@@ -9,6 +9,8 @@ edition = "2021"
 btleplug = "0.10.5"
 uuid = "1.3.2"
 
+binrw = "0.11.1"
+
 anyhow = "1.0.71"
 tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1.14"

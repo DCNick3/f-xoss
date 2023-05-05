@@ -1,9 +1,7 @@
 mod ctl_message;
 mod device;
 
-use btleplug::api::{
-    BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter, WriteType,
-};
+use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use std::pin::Pin;
 use std::time::Duration;
@@ -12,6 +10,7 @@ use anyhow::{Context, Result};
 use tokio::select;
 use tokio_stream::{Stream, StreamExt};
 
+use crate::ctl_message::{ControlMessageType, RawControlMessage};
 use crate::device::XossDevice;
 use tracing::{info, warn};
 
@@ -37,10 +36,6 @@ async fn find_adapter(manager: &Manager) -> Result<Adapter> {
     }
 
     Ok(result)
-}
-
-struct ScanGuard<'a> {
-    adapter: &'a Adapter,
 }
 
 async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral>> {
@@ -129,10 +124,17 @@ async fn main() -> Result<()> {
         .context("Failed to initialize the device")?;
 
     let reply = device
-        .send_ctl(vec![0x00, 0x00, 0x00])
+        .send_ctl(RawControlMessage {
+            msg_type: ControlMessageType::StatusReturn,
+            body: (*b"").into(),
+        })
         .await
-        .context("Failed to send a message")?;
-    println!("Reply: {}", hex::encode(reply));
+        .context("Failed to send a control message")?;
+    println!(
+        "Reply: {:?} {:?}",
+        reply.msg_type,
+        String::from_utf8(reply.body).unwrap()
+    );
 
     Ok(())
 }
