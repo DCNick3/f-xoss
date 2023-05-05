@@ -14,7 +14,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 
-use crate::ctl_message::{partial_checksum, CheckSummed, RawControlMessage};
+use crate::ctl_message::raw::{partial_checksum, CheckSummed, RawControlMessage};
 use tracing::{info, trace, warn};
 use uuid::Uuid;
 

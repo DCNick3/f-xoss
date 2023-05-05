@@ -5,31 +5,65 @@ use std::io::Write;
 #[derive(BinRead, BinWrite, Debug)]
 #[brw(repr(u8))]
 pub enum ControlMessageType {
+    /// Returns a device identifier (8 hex bytes
     DbgCmd = 0x0,
+    /// Interrupts the current file transfer when sent to the device, or indicates that the device is idle when sent to the host
     Idle = 0x4,
+
+    /// Request a file from the device (starting a file transfer)
+    ///
+    /// The file itself is sent using YMODEM protocol outside of the control channel.
     RequestReturn = 0x5,
+    /// Successful response to [ControlMessageType::RequestReturn]
     Returning = 0x6,
+
+    /// Send a file to the device (starting a file transfer)
+    ///
+    /// The file itself is sent using YMODEM protocol outside of the control channel.
     RequestSend = 0x7,
+    /// Successful response to [ControlMessageType::RequestSend]
     Accept = 0x8,
+
+    /// Get free space on the device
     RequestCap = 0x9,
+    /// Successful response to [ControlMessageType::RequestCap]
     ReturnCap = 0xA,
+
+    /// Delete a file
     RequestDel = 0xD,
+    /// Successful response to [ControlMessageType::RequestDel]
     DelSuccess = 0xE,
+
+    /// Always returns [ControlMessageType::ErrVali]
     RequestDetail = 0xF,
+    /// Request to stop the current file transfer
     RequestStop = 0x1F,
+
     ErrVali = 0x11,
     ErrNoFile = 0x12,
     ErrMemory = 0x13,
     ErrStatus = 0x14,
     ErrDecode = 0x15,
+
+    /// Set time
     TimeSet = 0x54,
+    /// Successful response to [ControlMessageType::TimeSet]
     TimeSetRtn = 0x55,
+
     RequestMga = 0x77,
     ReturnMga = 0x78,
+
     StatusAct = 0xAC,
+
+    /// Perform factory reset
     RequestClr = 0xCC,
+    /// Successful response to [ControlMessageType::RequestClr]
     ReturnClr = 0xCD,
+
+    /// Reboot device to DFU mode
     DfuEnter = 0xDF,
+
+    /// Get transfer status
     StatusReturn = 0xFF,
 }
 
