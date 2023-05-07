@@ -237,6 +237,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
+
+[[package]]
 name = "dashmap"
 version = "5.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -287,8 +293,10 @@ dependencies = [
  "binrw",
  "btleplug",
  "bytes",
+ "crc16",
  "futures-util",
  "hex",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",

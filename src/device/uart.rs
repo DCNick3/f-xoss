@@ -14,7 +14,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::debug;
+use tracing::{debug, trace};
 
 pub struct UartChannel {
     shared: Arc<Shared>,
@@ -195,6 +195,7 @@ impl AsyncWrite for UartStream {
         let tx_characteristic = this.tx_characteristic.clone();
 
         let fut = async move {
+            trace!("TX: {}", hex::encode(&buf));
             shared
                 .device
                 .write(&tx_characteristic, &buf, WriteType::WithoutResponse)

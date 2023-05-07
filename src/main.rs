@@ -14,6 +14,7 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::ctl_message::raw::{ControlMessageType, RawControlMessage};
 use crate::device::XossDevice;
+use crate::ymodem::{YModemHeader, YModemPacket, MAX_PACKET_SIZE};
 use tracing::{info, warn};
 
 async fn find_adapter(manager: &Manager) -> Result<Adapter> {
@@ -130,7 +131,8 @@ async fn main() -> Result<()> {
     let reply = device
         .send_ctl(RawControlMessage {
             msg_type: ControlMessageType::RequestReturn,
-            body: (*b"user_profile.json").into(),
+            // body: (*b"workouts.json").into(),
+            body: (*b"20230506182421.fit").into(),
         })
         .await
         .context("Failed to send a control message")?;
@@ -140,18 +142,15 @@ async fn main() -> Result<()> {
         String::from_utf8(reply.body).unwrap()
     );
 
-    uart_stream
-        .write_all(b"C")
+    let mut buf = vec![];
+    ymodem::receive_file(&mut uart_stream, &mut buf)
         .await
-        .context("Failed to write C to UART")?;
+        .context("Failed to receive file")?;
 
-    let mut resp = [0u8; 128 + 5];
-    uart_stream
-        .read_exact(&mut resp)
-        .await
-        .context("Failed to read from UART")?;
+    println!("File received: {}", hex::encode(&buf));
+    // println!("File received: {}", String::from_utf8(buf).unwrap());
 
-    println!("Response: {:?}", hex::encode(resp));
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
     Ok(())
 }
