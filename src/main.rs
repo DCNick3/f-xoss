@@ -4,13 +4,16 @@ mod ymodem;
 
 use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
+use std::io::ErrorKind;
 use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures_util::{pin_mut, TryStreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::select;
 use tokio_stream::{Stream, StreamExt};
+use tokio_util::io::StreamReader;
 
 use crate::ctl_message::raw::{ControlMessageType, RawControlMessage};
 use crate::device::XossDevice;
@@ -132,7 +135,7 @@ async fn main() -> Result<()> {
         .send_ctl(RawControlMessage {
             msg_type: ControlMessageType::RequestReturn,
             // body: (*b"workouts.json").into(),
-            body: (*b"20230506182421.fit").into(),
+            body: (*b"20230508021939.fit").into(),
         })
         .await
         .context("Failed to send a control message")?;
@@ -142,10 +145,17 @@ async fn main() -> Result<()> {
         String::from_utf8(reply.body).unwrap()
     );
 
-    let mut buf = vec![];
-    ymodem::receive_file(&mut uart_stream, &mut buf)
+    let out_stream = ymodem::receive_file(&mut uart_stream)
         .await
-        .context("Failed to receive file")?;
+        .map_err(|e| std::io::Error::new(ErrorKind::Other, e));
+    let mut reader = StreamReader::new(out_stream);
+    pin_mut!(reader);
+
+    let mut buf = Vec::new();
+    reader
+        .read_to_end(&mut buf)
+        .await
+        .context("Failed to read the file")?;
 
     println!("File received: {}", hex::encode(&buf));
     // println!("File received: {}", String::from_utf8(buf).unwrap());

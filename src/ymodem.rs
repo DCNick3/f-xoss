@@ -1,6 +1,9 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use async_stream::try_stream;
+use bytes::Bytes;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio_stream::Stream;
 use tracing::warn;
 
 #[derive(Error, Debug)]
@@ -124,54 +127,53 @@ impl YModemHeader {
 
 pub async fn receive_file(
     io: &mut (impl AsyncRead + AsyncWrite + Unpin),
-    out: &mut (impl AsyncWrite + Unpin),
-) -> Result<()> {
-    io.write_all(b"C").await.context("Sending C")?;
+) -> impl Stream<Item = Result<Bytes>> + '_ {
+    try_stream! {
+        io.write_all(b"C").await.context("Sending C")?;
 
-    let mut buffer = [0u8; MAX_PACKET_SIZE];
-    let mut seq = 0;
+        let mut buffer = [0u8; MAX_PACKET_SIZE];
+        let mut seq = 0;
 
-    let header_packet = YModemPacket::read(io, &mut buffer)
-        .await
-        .context("Reading YModem header")?;
-    let header = YModemHeader::parse(&header_packet).context("Parsing YModem header")?;
-
-    if seq != header_packet.seq {
-        bail!("Invalid sequence number");
-    }
-    io.write_all(&[ACK]).await.context("Sending ACK")?;
-    io.write_all(b"C").await.context("Sending C")?;
-
-    let mut len_left = header.size;
-
-    while len_left > 0 {
-        seq = seq.wrapping_add(1);
-
-        let packet = YModemPacket::read(io, &mut buffer)
+        let header_packet = YModemPacket::read(io, &mut buffer)
             .await
-            .context("Reading YModem packet")?;
+            .context("Reading YModem header")?;
+        let header = YModemHeader::parse(&header_packet).context("Parsing YModem header")?;
 
-        if seq != packet.seq {
-            bail!("Invalid sequence number");
+        if seq != header_packet.seq {
+            Err(anyhow!("Invalid sequence number"))?;
         }
         io.write_all(&[ACK]).await.context("Sending ACK")?;
+        io.write_all(b"C").await.context("Sending C")?;
 
-        let data_len = std::cmp::min(len_left, packet.data.len());
-        let data = &packet.data[..data_len];
-        len_left -= data_len;
+        let mut len_left = header.size;
 
-        out.write_all(data).await.context("Writing YModem packet")?;
+        while len_left > 0 {
+            seq = seq.wrapping_add(1);
+
+            let packet = YModemPacket::read(io, &mut buffer)
+                .await
+                .context("Reading YModem packet")?;
+
+            if seq != packet.seq {
+                Err(anyhow!("Invalid sequence number"))?;
+            }
+            io.write_all(&[ACK]).await.context("Sending ACK")?;
+
+            let data_len = std::cmp::min(len_left, packet.data.len());
+            let data = Bytes::copy_from_slice(&packet.data[..data_len]);
+            len_left -= data_len;
+
+            yield data;
+        }
+
+        if io.read_u8().await.context("Reading EOT")? != EOT {
+            Err(anyhow!("Invalid EOT"))?;
+        }
+        io.write_all(&[NAK]).await.context("Sending ACK")?;
+        if io.read_u8().await.context("Reading EOT")? != EOT {
+            Err(anyhow!("Invalid EOT"))?;
+        }
+        io.write_all(&[ACK]).await.context("Sending ACK")?;
+        io.flush().await.context("Flushing")?;
     }
-
-    if io.read_u8().await.context("Reading EOT")? != EOT {
-        bail!("Invalid EOT");
-    }
-    io.write_all(&[NAK]).await.context("Sending ACK")?;
-    if io.read_u8().await.context("Reading EOT")? != EOT {
-        bail!("Invalid EOT");
-    }
-    io.write_all(&[ACK]).await.context("Sending ACK")?;
-    io.flush().await.context("Flushing")?;
-
-    Ok(())
 }

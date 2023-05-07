@@ -74,7 +74,7 @@ impl UartChannel {
 
         Self {
             shared,
-            mtu: 140,
+            mtu: 206,
             tx_characteristic,
             stream_sender,
         }
