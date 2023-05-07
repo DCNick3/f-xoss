@@ -1,20 +1,23 @@
+mod uart;
+
+use crate::ctl_message::raw::{partial_checksum, CheckSummed, RawControlMessage};
+use uart::UartChannel;
+pub use uart::UartStream;
+
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration;
 
-use btleplug::api::{Characteristic, Peripheral as _, WriteType};
-use btleplug::platform::Peripheral;
-
 use anyhow::{bail, Context, Result};
 use binrw::io::NoSeek;
 use binrw::{BinRead, BinWrite};
+use btleplug::api::{Characteristic, Peripheral as _, WriteType};
+use btleplug::platform::Peripheral;
 use futures_util::future::{AbortHandle, Abortable};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
-
-use crate::ctl_message::raw::{partial_checksum, CheckSummed, RawControlMessage};
 use tracing::{info, trace, warn};
 use uuid::Uuid;
 
@@ -26,13 +29,6 @@ struct CtlChannel {
     shared: Arc<Shared>,
     ctl_characteristic: Characteristic,
     ctl_recv: Receiver<Vec<u8>>,
-}
-
-struct UartChannel {
-    shared: Arc<Shared>,
-    tx_characteristic: Characteristic,
-    rx_characteristic: Characteristic,
-    rx_recv: Receiver<Vec<u8>>,
 }
 
 struct Shared {
@@ -153,12 +149,12 @@ impl XossDevice {
                     ctl_characteristic,
                     ctl_recv,
                 },
-                uart_channel: UartChannel {
-                    shared: shared.clone(),
+                uart_channel: UartChannel::new(
+                    shared,
                     tx_characteristic,
                     rx_characteristic,
                     rx_recv,
-                },
+                ),
             }),
         };
 
@@ -168,6 +164,11 @@ impl XossDevice {
     pub async fn send_ctl(&self, message: RawControlMessage) -> Result<RawControlMessage> {
         let mut inner = self.inner.lock().await;
         inner.ctl_channel.send_ctl(message).await
+    }
+
+    pub async fn open_uart_stream(&self) -> UartStream {
+        let inner = self.inner.lock().await;
+        inner.uart_channel.open_stream().await
     }
 }
 

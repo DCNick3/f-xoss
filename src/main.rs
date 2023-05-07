@@ -1,5 +1,6 @@
 mod ctl_message;
 mod device;
+mod ymodem;
 
 use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
@@ -7,10 +8,11 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::select;
 use tokio_stream::{Stream, StreamExt};
 
-use crate::ctl_message::{ControlMessageType, RawControlMessage};
+use crate::ctl_message::raw::{ControlMessageType, RawControlMessage};
 use crate::device::XossDevice;
 use tracing::{info, warn};
 
@@ -123,10 +125,12 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to initialize the device")?;
 
+    let mut uart_stream = device.open_uart_stream().await;
+
     let reply = device
         .send_ctl(RawControlMessage {
-            msg_type: ControlMessageType::StatusReturn,
-            body: (*b"").into(),
+            msg_type: ControlMessageType::RequestReturn,
+            body: (*b"user_profile.json").into(),
         })
         .await
         .context("Failed to send a control message")?;
@@ -135,6 +139,19 @@ async fn main() -> Result<()> {
         reply.msg_type,
         String::from_utf8(reply.body).unwrap()
     );
+
+    uart_stream
+        .write_all(b"C")
+        .await
+        .context("Failed to write C to UART")?;
+
+    let mut resp = [0u8; 128 + 5];
+    uart_stream
+        .read_exact(&mut resp)
+        .await
+        .context("Failed to read from UART")?;
+
+    println!("Response: {:?}", hex::encode(resp));
 
     Ok(())
 }
