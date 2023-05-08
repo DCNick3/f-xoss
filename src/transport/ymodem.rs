@@ -2,8 +2,10 @@ use anyhow::{anyhow, Context, Result};
 use async_stream::try_stream;
 use bytes::Bytes;
 use indicatif::ProgressStyle;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::time::timeout;
 use tokio_stream::Stream;
 use tracing::{debug_span, info_span, warn, Span};
 use tracing_futures::Instrument;
@@ -133,24 +135,33 @@ pub struct ReceivingFileInfo {
     pub size: u64,
 }
 
+const UART_TIMEOUT: Duration = Duration::from_secs(1);
+
 pub async fn receive_file(
     io: &mut (impl AsyncRead + AsyncWrite + Unpin),
 ) -> Result<(ReceivingFileInfo, impl Stream<Item = Result<Bytes>> + '_)> {
-    io.write_all(b"C").await.context("Sending C")?;
-
     let mut buffer = [0u8; MAX_PACKET_SIZE];
     let mut seq = 0;
 
-    let header_packet = YModemPacket::read(io, &mut buffer)
-        .await
-        .context("Reading YModem header")?;
-    let header = YModemHeader::parse(&header_packet).context("Parsing YModem header")?;
+    let fut = async {
+        io.write_all(b"C").await.context("Sending C")?;
 
-    if seq != header_packet.seq {
-        Err(anyhow!("Invalid sequence number"))?;
-    }
-    io.write_all(&[ACK]).await.context("Sending ACK")?;
-    io.write_all(b"C").await.context("Sending C")?;
+        let header_packet = YModemPacket::read(io, &mut buffer)
+            .await
+            .context("Reading YModem header")?;
+        let header = YModemHeader::parse(&header_packet).context("Parsing YModem header")?;
+
+        if seq != header_packet.seq {
+            Err(anyhow!("Invalid sequence number"))?;
+        }
+        io.write_all(&[ACK]).await.context("Sending ACK")?;
+        io.write_all(b"C").await.context("Sending C")?;
+
+        Ok::<_, anyhow::Error>(header)
+    };
+    let header = timeout(UART_TIMEOUT, fut)
+        .await
+        .context("Timed out initialing the transfer")??;
 
     let file_info = ReceivingFileInfo {
         name: header.name,
@@ -170,37 +181,51 @@ pub async fn receive_file(
             while len_left > 0 {
                 seq = seq.wrapping_add(1);
 
-                let packet = YModemPacket::read(io, &mut buffer)
-                    .instrument(debug_span!("read_ymodem_packet", seq = seq, len_left = len_left, "Reading YModem packet"))
+                let fut = async {
+                    let packet = YModemPacket::read(io, &mut buffer)
+                        .instrument(debug_span!("read_ymodem_packet", seq = seq, len_left = len_left, "Reading YModem packet"))
+                        .await
+                        .context("Reading YModem packet")?;
+
+                    if seq != packet.seq {
+                        Err(anyhow!("Invalid sequence number"))?;
+                    }
+
+                    // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                    io.write_all(&[ACK]).await.context("Sending ACK")?;
+
+                    let data_len = std::cmp::min(len_left, packet.data.len() as u64) as usize;
+                    let data = Bytes::copy_from_slice(&packet.data[..data_len]);
+                    cur_span.pb_inc(data_len as u64);
+                    len_left -= data_len as u64;
+
+                    Ok::<_, anyhow::Error>(data)
+                };
+                let data = timeout(UART_TIMEOUT, fut)
                     .await
-                    .context("Reading YModem packet")?;
-
-                if seq != packet.seq {
-                    Err(anyhow!("Invalid sequence number"))?;
-                }
-
-                // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-                io.write_all(&[ACK]).await.context("Sending ACK")?;
-
-                let data_len = std::cmp::min(len_left, packet.data.len() as u64) as usize;
-                let data = Bytes::copy_from_slice(&packet.data[..data_len]);
-                cur_span.pb_inc(data_len as u64);
-                len_left -= data_len as u64;
+                    .context("Timed out reading packet")??;
 
                 yield data;
             }
 
-            if io.read_u8().await.context("Reading EOT")? != EOT {
-                Err(anyhow!("Invalid EOT"))?;
-            }
-            io.write_all(&[NAK]).await.context("Sending ACK")?;
-            if io.read_u8().await.context("Reading EOT")? != EOT {
-                Err(anyhow!("Invalid EOT"))?;
-            }
-            io.write_all(&[ACK]).await.context("Sending ACK")?;
-            // make sure the last ACK gets written
-            io.flush().await.context("Flushing")?;
+            let fut = async {
+                if io.read_u8().await.context("Reading EOT")? != EOT {
+                    Err(anyhow!("Invalid EOT"))?;
+                }
+                io.write_all(&[NAK]).await.context("Sending ACK")?;
+                if io.read_u8().await.context("Reading EOT")? != EOT {
+                    Err(anyhow!("Invalid EOT"))?;
+                }
+                io.write_all(&[ACK]).await.context("Sending ACK")?;
+                // make sure the last ACK gets written
+                io.flush().await.context("Flushing")?;
+
+                Ok::<_, anyhow::Error>(())
+            };
+            timeout(UART_TIMEOUT, fut)
+                .await
+                .context("Timed out reading EOT")??;
         }
         .instrument(info_span!("receive_file")),
     ))
