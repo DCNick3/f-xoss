@@ -2,7 +2,7 @@ use binrw::io::NoSeek;
 use binrw::{BinRead, BinResult, BinWrite, Endian};
 use std::io::Write;
 
-#[derive(BinRead, BinWrite, Debug)]
+#[derive(BinRead, BinWrite, Debug, PartialEq, Eq, Clone, Copy)]
 #[brw(repr(u8))]
 pub enum ControlMessageType {
     /// Returns a device identifier (8 hex bytes

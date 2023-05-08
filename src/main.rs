@@ -1,5 +1,4 @@
 mod transport;
-mod ymodem;
 
 use std::io::ErrorKind;
 use std::pin::Pin;
@@ -16,9 +15,10 @@ use tokio_stream::{Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
 use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
-use crate::transport::device::XossDevice;
-use tracing::{info, info_span, instrument, warn};
+use crate::transport::device::XossTransport;
+use tracing::{info, info_span, instrument, warn, Span};
 use tracing_futures::Instrument;
+use tracing_indicatif::span_ext::IndicatifSpanExt;
 use tracing_indicatif::IndicatifLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -105,7 +105,9 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
 }
 
 #[instrument(skip(device))]
-async fn receive_file(device: &XossDevice, filename: &str) -> Result<()> {
+async fn receive_file(device: &XossTransport, filename: &str) -> Result<()> {
+    Span::current().pb_set_message(&format!("Downloading {} from the device", filename));
+
     let mut uart_stream = device.open_uart_stream().await;
 
     let reply = device
@@ -116,20 +118,17 @@ async fn receive_file(device: &XossDevice, filename: &str) -> Result<()> {
         })
         .await
         .context("Failed to send a control message")?;
-    println!(
-        "Reply: {:?} {:?}",
-        reply.msg_type,
-        String::from_utf8(reply.body).unwrap()
-    );
+    assert_eq!(reply.msg_type, ControlMessageType::Returning);
 
-    let (file_info, out_stream) = ymodem::receive_file(&mut uart_stream).await?;
+    let (file_info, out_stream) = transport::ymodem::receive_file(&mut uart_stream).await?;
     let reader =
         StreamReader::new(out_stream.map_err(|e| std::io::Error::new(ErrorKind::Other, e)));
     pin_mut!(reader);
 
-    println!(
-        "Downloading file with size {}",
-        humansize::format_size(file_info.size, humansize::BINARY)
+    info!(
+        "Downloading {} ({})",
+        filename,
+        humansize::format_size(file_info.size, humansize::BINARY.decimal_zeroes(2))
     );
 
     let start = Instant::now();
@@ -145,8 +144,16 @@ async fn receive_file(device: &XossDevice, filename: &str) -> Result<()> {
 
     let speed = (buf.len() as f64) / (time.as_secs_f64()) / 1024.0;
 
-    println!("File received: {}", hex::encode(&buf));
-    println!("Speed: {:.2} KiB/s", speed);
+    info!(
+        "Downloaded {} ({}) in {:.2} seconds ({:.2} KiB/s)",
+        filename,
+        humansize::format_size(buf.len(), humansize::BINARY.decimal_zeroes(2)),
+        time.as_secs_f64(),
+        speed
+    );
+
+    // println!("File received: {}", hex::encode(&buf));
+    // println!("Speed: {:.2} KiB/s", speed);
     // println!("File received: {}", String::from_utf8(buf).unwrap());
 
     Ok(())
@@ -182,7 +189,7 @@ async fn main() -> Result<()> {
         .context("Failed to find device")?
         .context("Device not found")?;
 
-    println!(
+    info!(
         "Device found: {:?}",
         device.properties().await?.unwrap().local_name
     );
@@ -194,7 +201,7 @@ async fn main() -> Result<()> {
         .context("Failed to connect to the device")?;
     info!("Connected to the device");
 
-    let device = XossDevice::new(device)
+    let device = XossTransport::new(device)
         .await
         .context("Failed to initialize the device")?;
 

@@ -18,7 +18,7 @@ use futures_util::future::{AbortHandle, Abortable};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
-use tracing::{info, instrument, trace, warn, Level};
+use tracing::{debug, info, instrument, trace, warn, Level};
 use uuid::Uuid;
 
 const TX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400002_b5a3_f393_e0a9_e50e24dcca9e);
@@ -42,14 +42,15 @@ struct Inner {
     uart_channel: UartChannel,
 }
 
-pub struct XossDevice {
+pub struct XossTransport {
     shared: Arc<Shared>,
     inner: Mutex<Inner>,
 }
 
-impl XossDevice {
+impl XossTransport {
+    #[instrument(skip(device), fields(id = %device.id()))]
     pub async fn new(device: Peripheral) -> Result<Self> {
-        info!("Discovering services...");
+        info!("Discovering XOSS services...");
 
         device
             .discover_services()
@@ -67,11 +68,9 @@ impl XossDevice {
         ]);
 
         for characteristic in device.characteristics() {
-            trace!(
-                "Characteristic {}: {} {:?}",
-                characteristic.service_uuid,
-                characteristic.uuid,
-                characteristic.properties
+            debug!(
+                "BLE characteristic {}: {} {:?}",
+                characteristic.service_uuid, characteristic.uuid, characteristic.properties
             );
 
             if let Some(c) = required_characteristics.get_mut(&characteristic.uuid) {
