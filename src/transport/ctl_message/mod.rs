@@ -131,3 +131,12 @@ impl<T: BinWrite> BinWrite for CheckSummed<T> {
         Ok(())
     }
 }
+
+#[derive(Debug)]
+pub enum ControlError {
+    Validation,
+    NoFile,
+    NoMemory,
+    InvalidStatus,
+    DecodeFailed,
+}

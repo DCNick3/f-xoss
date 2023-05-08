@@ -1,5 +1,4 @@
-mod ctl_message;
-mod device;
+mod transport;
 mod ymodem;
 
 use std::io::ErrorKind;
@@ -16,8 +15,8 @@ use tokio::time::Instant;
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
-use crate::ctl_message::raw::{ControlMessageType, RawControlMessage};
-use crate::device::XossDevice;
+use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
+use crate::transport::device::XossDevice;
 use tracing::{info, info_span, instrument, warn};
 use tracing_futures::Instrument;
 use tracing_indicatif::IndicatifLayer;

@@ -1,6 +1,6 @@
 mod uart;
 
-use crate::ctl_message::raw::{partial_checksum, CheckSummed, RawControlMessage};
+use super::ctl_message::{partial_checksum, CheckSummed, RawControlMessage};
 use uart::UartChannel;
 pub use uart::UartStream;
 
