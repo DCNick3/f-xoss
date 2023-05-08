@@ -157,6 +157,9 @@ pub async fn receive_file(
             if seq != packet.seq {
                 Err(anyhow!("Invalid sequence number"))?;
             }
+
+            // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
             io.write_all(&[ACK]).await.context("Sending ACK")?;
 
             let data_len = std::cmp::min(len_left, packet.data.len());

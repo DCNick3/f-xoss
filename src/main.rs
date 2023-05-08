@@ -2,16 +2,18 @@ mod ctl_message;
 mod device;
 mod ymodem;
 
-use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::{Adapter, Manager, Peripheral};
 use std::io::ErrorKind;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
+use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures_util::{pin_mut, TryStreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::select;
+use tokio::time::Instant;
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
@@ -101,6 +103,9 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(windows)]
+    let enabled = ansi_term::enable_ansi_support();
+
     tracing_subscriber::fmt::init();
 
     let manager = Manager::new().await.context("Failed to create a manager")?;
@@ -148,8 +153,10 @@ async fn main() -> Result<()> {
     let out_stream = ymodem::receive_file(&mut uart_stream)
         .await
         .map_err(|e| std::io::Error::new(ErrorKind::Other, e));
-    let mut reader = StreamReader::new(out_stream);
+    let reader = StreamReader::new(out_stream);
     pin_mut!(reader);
+
+    let start = Instant::now();
 
     let mut buf = Vec::new();
     reader
@@ -157,7 +164,12 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to read the file")?;
 
+    let time = start.elapsed();
+
+    let speed = (buf.len() as f64) / (time.as_secs_f64()) / 1024.0;
+
     println!("File received: {}", hex::encode(&buf));
+    println!("Speed: {:.2} KiB/s", speed);
     // println!("File received: {}", String::from_utf8(buf).unwrap());
 
     tokio::time::sleep(Duration::from_secs(10)).await;
