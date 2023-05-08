@@ -18,7 +18,7 @@ use futures_util::future::{AbortHandle, Abortable};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
-use tracing::{info, trace, warn};
+use tracing::{info, instrument, trace, warn, Level};
 use uuid::Uuid;
 
 const TX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400002_b5a3_f393_e0a9_e50e24dcca9e);
@@ -161,6 +161,7 @@ impl XossDevice {
         Ok(result)
     }
 
+    #[instrument(skip(self), ret, level = Level::DEBUG)]
     pub async fn send_ctl(&self, message: RawControlMessage) -> Result<RawControlMessage> {
         let mut inner = self.inner.lock().await;
         inner.ctl_channel.send_ctl(message).await
@@ -169,6 +170,12 @@ impl XossDevice {
     pub async fn open_uart_stream(&self) -> UartStream {
         let inner = self.inner.lock().await;
         inner.uart_channel.open_stream().await
+    }
+
+    pub async fn disconnect(self) -> Result<()> {
+        self.shared.device.disconnect().await?;
+
+        Ok(())
     }
 }
 

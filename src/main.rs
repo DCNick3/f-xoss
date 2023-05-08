@@ -3,7 +3,6 @@ mod device;
 mod ymodem;
 
 use std::io::ErrorKind;
-use std::ops::Deref;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -11,7 +10,7 @@ use anyhow::{Context, Result};
 use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures_util::{pin_mut, TryStreamExt};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::select;
 use tokio::time::Instant;
 use tokio_stream::{Stream, StreamExt};
@@ -19,8 +18,12 @@ use tokio_util::io::StreamReader;
 
 use crate::ctl_message::raw::{ControlMessageType, RawControlMessage};
 use crate::device::XossDevice;
-use crate::ymodem::{YModemHeader, YModemPacket, MAX_PACKET_SIZE};
-use tracing::{info, warn};
+use tracing::{info, info_span, instrument, warn};
+use tracing_futures::Instrument;
+use tracing_indicatif::IndicatifLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 async fn find_adapter(manager: &Manager) -> Result<Adapter> {
     let adapter_list = manager.adapters().await.context("Listing adapters")?;
@@ -46,6 +49,7 @@ async fn find_adapter(manager: &Manager) -> Result<Adapter> {
     Ok(result)
 }
 
+#[instrument(skip(adapter))]
 async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral>> {
     let events = adapter.events().await?;
 
@@ -101,12 +105,72 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
     Ok(result?)
 }
 
+#[instrument(skip(device))]
+async fn receive_file(device: &XossDevice, filename: &str) -> Result<()> {
+    let mut uart_stream = device.open_uart_stream().await;
+
+    let reply = device
+        .send_ctl(RawControlMessage {
+            msg_type: ControlMessageType::RequestReturn,
+            // body: (*b"workouts.json").into(),
+            body: filename.into(),
+        })
+        .await
+        .context("Failed to send a control message")?;
+    println!(
+        "Reply: {:?} {:?}",
+        reply.msg_type,
+        String::from_utf8(reply.body).unwrap()
+    );
+
+    let (file_info, out_stream) = ymodem::receive_file(&mut uart_stream).await?;
+    let reader =
+        StreamReader::new(out_stream.map_err(|e| std::io::Error::new(ErrorKind::Other, e)));
+    pin_mut!(reader);
+
+    println!(
+        "Downloading file with size {}",
+        humansize::format_size(file_info.size, humansize::BINARY)
+    );
+
+    let start = Instant::now();
+
+    let mut buf = Vec::new();
+    reader
+        .read_to_end(&mut buf)
+        .await
+        .context("Failed to read the file")?;
+    drop(reader);
+
+    let time = start.elapsed();
+
+    let speed = (buf.len() as f64) / (time.as_secs_f64()) / 1024.0;
+
+    println!("File received: {}", hex::encode(&buf));
+    println!("Speed: {:.2} KiB/s", speed);
+    // println!("File received: {}", String::from_utf8(buf).unwrap());
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(windows)]
-    let enabled = ansi_term::enable_ansi_support();
+    let _enabled = ansi_term::enable_ansi_support();
 
-    tracing_subscriber::fmt::init();
+    let indicatif_layer = IndicatifLayer::new();
+
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"))
+        .with_subscriber(
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(indicatif_layer.get_stdout_writer()),
+                )
+                .with(indicatif_layer),
+        )
+        .init();
 
     let manager = Manager::new().await.context("Failed to create a manager")?;
     let adapter = find_adapter(&manager)
@@ -126,6 +190,7 @@ async fn main() -> Result<()> {
 
     device
         .connect()
+        .instrument(info_span!("connect"))
         .await
         .context("Failed to connect to the device")?;
     info!("Connected to the device");
@@ -134,45 +199,17 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to initialize the device")?;
 
-    let mut uart_stream = device.open_uart_stream().await;
+    let res = receive_file(&device, "20230508021939.fit").await;
 
-    let reply = device
-        .send_ctl(RawControlMessage {
-            msg_type: ControlMessageType::RequestReturn,
-            // body: (*b"workouts.json").into(),
-            body: (*b"20230508021939.fit").into(),
-        })
+    tokio::time::sleep(Duration::from_secs(10))
+        .instrument(info_span!("final_sleep"))
+        .await;
+
+    device
+        .disconnect()
         .await
-        .context("Failed to send a control message")?;
-    println!(
-        "Reply: {:?} {:?}",
-        reply.msg_type,
-        String::from_utf8(reply.body).unwrap()
-    );
-
-    let out_stream = ymodem::receive_file(&mut uart_stream)
-        .await
-        .map_err(|e| std::io::Error::new(ErrorKind::Other, e));
-    let reader = StreamReader::new(out_stream);
-    pin_mut!(reader);
-
-    let start = Instant::now();
-
-    let mut buf = Vec::new();
-    reader
-        .read_to_end(&mut buf)
-        .await
-        .context("Failed to read the file")?;
-
-    let time = start.elapsed();
-
-    let speed = (buf.len() as f64) / (time.as_secs_f64()) / 1024.0;
-
-    println!("File received: {}", hex::encode(&buf));
-    println!("Speed: {:.2} KiB/s", speed);
-    // println!("File received: {}", String::from_utf8(buf).unwrap());
-
-    tokio::time::sleep(Duration::from_secs(10)).await;
+        .context("Failed to disconnect from the device")?;
+    res?;
 
     Ok(())
 }
