@@ -161,9 +161,29 @@ impl XossTransport {
     }
 
     #[instrument(skip(self), ret, level = Level::DEBUG)]
-    pub async fn send_ctl(&self, message: RawControlMessage) -> Result<RawControlMessage> {
+    pub async fn request_ctl(&self, message: RawControlMessage) -> Result<RawControlMessage> {
         let mut inner = self.inner.lock().await;
-        inner.ctl_channel.send_ctl(message).await
+        inner
+            .ctl_channel
+            .send_ctl(message)
+            .await
+            .context("Sending control message")?;
+
+        inner
+            .ctl_channel
+            .recv_ctl()
+            .await
+            .context("Reading control message")
+    }
+
+    #[instrument(skip(self), ret, level = Level::DEBUG)]
+    pub async fn recv_ctl(&self) -> Result<RawControlMessage> {
+        let mut inner = self.inner.lock().await;
+        inner
+            .ctl_channel
+            .recv_ctl()
+            .await
+            .context("Reading (isolated) control message")
     }
 
     pub async fn open_uart_stream(&self) -> UartStream {
@@ -179,7 +199,7 @@ impl XossTransport {
 }
 
 impl CtlChannel {
-    pub async fn send_ctl(&mut self, message: RawControlMessage) -> Result<RawControlMessage> {
+    pub async fn send_ctl(&mut self, message: RawControlMessage) -> Result<()> {
         // TODO: we may have troubles handling failures after sending but before receiving the reply
         // maybe send the command reset if it happens?
 
@@ -188,10 +208,16 @@ impl CtlChannel {
             .write_le(&mut NoSeek::new(&mut buffer))
             .context("Encoding message")?;
 
-        let reply = self
-            .send_ctl_raw(&buffer)
+        self.send_ctl_raw(&buffer)
             .await
             .context("Sending the message & receiving reply")?;
+
+        Ok(())
+    }
+
+    pub async fn recv_ctl(&mut self) -> Result<RawControlMessage> {
+        let reply = self.recv_ctl_raw().await?;
+
         let checksum = reply[reply.len() - 1];
         let reply = &reply[..reply.len() - 1];
 
@@ -205,7 +231,17 @@ impl CtlChannel {
         Ok(reply)
     }
 
-    async fn send_ctl_raw(&mut self, message: &[u8]) -> Result<Vec<u8>> {
+    async fn recv_ctl_raw(&mut self) -> Result<Vec<u8>> {
+        let recv = self.ctl_recv.recv();
+        let timeout = tokio::time::sleep(Duration::from_secs(1));
+
+        tokio::select! {
+            recv = recv => recv.context("Failed to receive control reply"),
+            _ = timeout => bail!("Timeout waiting for control reply"),
+        }
+    }
+
+    async fn send_ctl_raw(&mut self, message: &[u8]) -> Result<()> {
         if message.len() > 20 {
             bail!("Control message too long");
         }
@@ -215,12 +251,7 @@ impl CtlChannel {
             .write(&self.ctl_characteristic, message, WriteType::WithResponse)
             .await
             .context("Failed to send control message")?;
-        let recv = self.ctl_recv.recv();
-        let timeout = tokio::time::sleep(Duration::from_secs(1));
 
-        tokio::select! {
-            recv = recv => recv.context("Failed to receive control reply"),
-            _ = timeout => bail!("Timeout waiting for control reply"),
-        }
+        Ok(())
     }
 }

@@ -354,6 +354,7 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "async-stream",
+ "async-trait",
  "binrw",
  "btleplug",
  "bytes",

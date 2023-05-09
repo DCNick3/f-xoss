@@ -1,7 +1,9 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_stream::try_stream;
+use async_trait::async_trait;
 use bytes::Bytes;
 use indicatif::ProgressStyle;
+use std::io::Cursor;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -31,6 +33,8 @@ const NAK: u8 = 0x15;
 const CAN: u8 = 0x18;
 
 pub const MAX_PACKET_SIZE: usize = 1024 + 5;
+pub const SMALL_DATA_SIZE: usize = 128;
+pub const LARGE_DATA_SIZE: usize = 1024;
 
 #[derive(Debug)]
 pub struct YModemPacket<'a> {
@@ -39,12 +43,29 @@ pub struct YModemPacket<'a> {
 }
 
 impl<'a> YModemPacket<'a> {
+    pub fn new(seq: u8, data: &'a [u8]) -> Self {
+        assert!(
+            matches!(data.len(), SMALL_DATA_SIZE | LARGE_DATA_SIZE),
+            "Invalid YModel packet data length"
+        );
+        Self { seq, data }
+    }
+
     #[inline]
     fn data_len(start_byte: u8) -> Result<usize, Error> {
         match start_byte {
-            SOH => Ok(128),
-            STX => Ok(1024),
+            SOH => Ok(SMALL_DATA_SIZE),
+            STX => Ok(LARGE_DATA_SIZE),
             _ => Err(Error::InvalidStart),
+        }
+    }
+
+    #[inline]
+    fn start_byte(&self) -> u8 {
+        match self.data.len() {
+            SMALL_DATA_SIZE => SOH,
+            LARGE_DATA_SIZE => STX,
+            _ => panic!("Invalid data length"),
         }
     }
 
@@ -80,6 +101,23 @@ impl<'a> YModemPacket<'a> {
         Ok(Self { seq, data })
     }
 
+    pub fn serialize<'b>(&self, buf: &'b mut [u8; MAX_PACKET_SIZE]) -> &'b [u8] {
+        let start = self.start_byte();
+        let seq = self.seq;
+        let seq_inv = seq ^ 0xff;
+        let data = self.data;
+        let crc = crc16::State::<crc16::ARC>::calculate(data);
+
+        buf[0] = start;
+        buf[1] = seq;
+        buf[2] = seq_inv;
+        buf[3..3 + data.len()].copy_from_slice(data);
+        buf[3 + data.len()] = (crc >> 8) as u8;
+        buf[3 + data.len() + 1] = crc as u8;
+
+        &buf[..3 + data.len() + 2]
+    }
+
     pub async fn read(
         reader: &mut (impl AsyncRead + Unpin),
         buffer: &'a mut [u8; MAX_PACKET_SIZE],
@@ -91,6 +129,15 @@ impl<'a> YModemPacket<'a> {
         reader.read_exact(&mut buffer[1..data_len + 5]).await?;
 
         Self::parse(&buffer[..data_len + 5]).map_err(|e| e.into())
+    }
+
+    pub async fn write(&self, writer: &mut (impl AsyncWrite + Unpin)) -> Result<()> {
+        let mut buffer = [0u8; MAX_PACKET_SIZE];
+        let packet = self.serialize(&mut buffer);
+
+        writer.write_all(packet).await?;
+
+        Ok(())
     }
 }
 
@@ -137,6 +184,33 @@ pub struct ReceivingFileInfo {
 
 const UART_TIMEOUT: Duration = Duration::from_secs(1);
 
+#[async_trait]
+pub trait SizedAsyncRead: AsyncRead {
+    async fn size(&self) -> std::io::Result<u64>;
+}
+
+#[async_trait]
+impl SizedAsyncRead for tokio::fs::File {
+    async fn size(&self) -> std::io::Result<u64> {
+        tokio::fs::File::metadata(self).await.map(|m| m.len())
+    }
+}
+
+#[async_trait]
+impl<T: AsRef<[u8]> + Unpin + Sync> SizedAsyncRead for Cursor<T> {
+    async fn size(&self) -> std::io::Result<u64> {
+        let len = self.get_ref().as_ref().len();
+        Ok(len as u64)
+    }
+}
+
+fn progressbar_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template("{span_child_prefix}{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta} @ {binary_bytes_per_sec})")
+        .unwrap()
+        .progress_chars("#>-")
+}
+
 pub async fn receive_file(
     io: &mut (impl AsyncRead + AsyncWrite + Unpin),
 ) -> Result<(ReceivingFileInfo, impl Stream<Item = Result<Bytes>> + '_)> {
@@ -175,7 +249,7 @@ pub async fn receive_file(
         try_stream! {
             let cur_span = Span::current();
 
-            cur_span.pb_set_style(&ProgressStyle::default_bar());
+            cur_span.pb_set_style(&progressbar_style());
             cur_span.pb_set_length(len_left);
 
             while len_left > 0 {
@@ -183,7 +257,6 @@ pub async fn receive_file(
 
                 let fut = async {
                     let packet = YModemPacket::read(io, &mut buffer)
-                        .instrument(debug_span!("read_ymodem_packet", seq = seq, len_left = len_left, "Reading YModem packet"))
                         .await
                         .context("Reading YModem packet")?;
 
@@ -203,6 +276,7 @@ pub async fn receive_file(
                     Ok::<_, anyhow::Error>(data)
                 };
                 let data = timeout(UART_TIMEOUT, fut)
+                    .instrument(debug_span!("read_packet", seq))
                     .await
                     .context("Timed out reading packet")??;
 
@@ -213,7 +287,7 @@ pub async fn receive_file(
                 if io.read_u8().await.context("Reading EOT")? != EOT {
                     Err(anyhow!("Invalid EOT"))?;
                 }
-                io.write_all(&[NAK]).await.context("Sending ACK")?;
+                io.write_all(&[NAK]).await.context("Sending NAK")?;
                 if io.read_u8().await.context("Reading EOT")? != EOT {
                     Err(anyhow!("Invalid EOT"))?;
                 }
@@ -229,4 +303,103 @@ pub async fn receive_file(
         }
         .instrument(info_span!("receive_file")),
     ))
+}
+
+pub async fn send_file(
+    io: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    filename: &str,
+    file: &mut (impl SizedAsyncRead + Unpin),
+) -> Result<()> {
+    let mut seq = 0;
+
+    let file_size = file.size().await.context("Getting file size")?;
+    let header_str = format!("{} {}", filename, file_size);
+
+    let packet_data_size = if file_size < LARGE_DATA_SIZE as u64 {
+        SMALL_DATA_SIZE
+    } else {
+        LARGE_DATA_SIZE
+    };
+
+    if header_str.len() > SMALL_DATA_SIZE {
+        bail!("Filename too long");
+    }
+
+    let cur_span = Span::current();
+    cur_span.pb_set_style(&progressbar_style());
+    cur_span.pb_set_length(file_size);
+
+    let mut header_data = [0u8; SMALL_DATA_SIZE];
+    header_data[..header_str.len()].copy_from_slice(header_str.as_bytes());
+
+    let fut = async {
+        let header_packet = YModemPacket::new(seq, &header_data);
+        if io.read_u8().await.context("Reading C")? != b'C' {
+            bail!("Expected C");
+        }
+        header_packet
+            .write(io)
+            .await
+            .context("Writing YModem header")?;
+        if io.read_u8().await.context("Reading ACK")? != ACK {
+            bail!("Expected ACK");
+        }
+        if io.read_u8().await.context("Reading C")? != b'C' {
+            bail!("Expected C");
+        }
+
+        Ok::<_, anyhow::Error>(())
+    };
+    timeout(UART_TIMEOUT, fut)
+        .await
+        .context("Timed out initialing the transfer")??;
+
+    let mut data_buffer = vec![0u8; packet_data_size];
+
+    let mut len_left = file_size;
+    while len_left > 0 {
+        seq = seq.wrapping_add(1);
+
+        let data_len = std::cmp::min(len_left, packet_data_size as u64) as usize;
+        file.read_exact(&mut data_buffer[..data_len])
+            .await
+            .context("Reading file")?;
+        // zero out the rest of the buffer
+        data_buffer[data_len..].iter_mut().for_each(|b| *b = 0);
+
+        let fut = async {
+            let packet = YModemPacket::new(seq, &data_buffer);
+            packet.write(io).await.context("Writing YModem packet")?;
+            if io.read_u8().await.context("Reading ACK")? != ACK {
+                bail!("Expected ACK");
+            }
+            Ok::<_, anyhow::Error>(())
+        };
+        timeout(UART_TIMEOUT, fut)
+            .instrument(debug_span!("write_packet", seq))
+            .await
+            .context("Timed out writing packet")??;
+
+        cur_span.pb_inc(data_len as u64);
+        len_left -= data_len as u64;
+    }
+
+    let fut = async {
+        io.write_all(&[EOT]).await.context("Sending EOT")?;
+        if io.read_u8().await.context("Reading NAK")? != NAK {
+            bail!("Expected NAK");
+        }
+        io.write_all(&[EOT]).await.context("Sending EOT")?;
+        if io.read_u8().await.context("Reading ACK")? != ACK {
+            bail!("Expected ACK");
+        }
+
+        Ok::<_, anyhow::Error>(())
+    };
+
+    timeout(UART_TIMEOUT, fut)
+        .await
+        .context("Timed out writing EOT")??;
+
+    Ok(())
 }

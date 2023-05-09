@@ -1,6 +1,6 @@
 mod transport;
 
-use std::io::ErrorKind;
+use std::io::{Cursor, ErrorKind};
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -105,13 +105,13 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
 }
 
 #[instrument(skip(device))]
-async fn receive_file(device: &XossTransport, filename: &str) -> Result<()> {
-    Span::current().pb_set_message(&format!("Downloading {} from the device", filename));
-
+async fn receive_file(device: &XossTransport, filename: &str) -> Result<Vec<u8>> {
     let mut uart_stream = device.open_uart_stream().await;
 
+    let start = Instant::now();
+
     let reply = device
-        .send_ctl(RawControlMessage {
+        .request_ctl(RawControlMessage {
             msg_type: ControlMessageType::RequestReturn,
             // body: (*b"workouts.json").into(),
             body: filename.into(),
@@ -131,14 +131,18 @@ async fn receive_file(device: &XossTransport, filename: &str) -> Result<()> {
         humansize::format_size(file_info.size, humansize::BINARY.decimal_zeroes(2))
     );
 
-    let start = Instant::now();
-
     let mut buf = Vec::new();
     reader
         .read_to_end(&mut buf)
         .await
         .context("Failed to read the file")?;
     drop(reader);
+
+    let reply = device
+        .recv_ctl()
+        .await
+        .context("Receiving the post-download status message")?;
+    assert_eq!(reply.msg_type, ControlMessageType::Idle);
 
     let time = start.elapsed();
 
@@ -152,9 +156,43 @@ async fn receive_file(device: &XossTransport, filename: &str) -> Result<()> {
         speed
     );
 
-    // println!("File received: {}", hex::encode(&buf));
-    // println!("Speed: {:.2} KiB/s", speed);
-    // println!("File received: {}", String::from_utf8(buf).unwrap());
+    Ok(buf)
+}
+
+#[instrument(skip(device, content))]
+async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Result<()> {
+    let mut uart_stream = device.open_uart_stream().await;
+
+    let start = Instant::now();
+
+    let reply = device
+        .request_ctl(RawControlMessage {
+            msg_type: ControlMessageType::RequestSend,
+            body: filename.into(),
+        })
+        .await
+        .context("Failed to send a control message")?;
+    assert_eq!(reply.msg_type, ControlMessageType::Accept);
+
+    transport::ymodem::send_file(&mut uart_stream, filename, &mut Cursor::new(content)).await?;
+
+    let reply = device
+        .recv_ctl()
+        .await
+        .context("Receiving the post-download status message")?;
+    assert_eq!(reply.msg_type, ControlMessageType::Idle);
+
+    let time = start.elapsed();
+
+    let speed = (content.len() as f64) / (time.as_secs_f64()) / 1024.0;
+
+    info!(
+        "Uploaded {} ({}) in {:.2} seconds ({:.2} KiB/s)",
+        filename,
+        humansize::format_size(content.len(), humansize::BINARY.decimal_zeroes(2)),
+        time.as_secs_f64(),
+        speed
+    );
 
     Ok(())
 }
@@ -205,7 +243,16 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to initialize the device")?;
 
-    let res = receive_file(&device, "20230508021939.fit").await;
+    let res = receive_file(
+        &device,
+        "20230508021939.fit", // "user_profile.json",
+    )
+    .await;
+
+    let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
+    send_file(&device, "user_profile.json", user_profile.as_bytes())
+        .await
+        .context("Failed to send the user profile")?;
 
     tokio::time::sleep(Duration::from_secs(10))
         .instrument(info_span!("final_sleep"))
