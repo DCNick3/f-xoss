@@ -182,7 +182,7 @@ pub struct ReceivingFileInfo {
     pub size: u64,
 }
 
-const UART_TIMEOUT: Duration = Duration::from_secs(1);
+const UART_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[async_trait]
 pub trait SizedAsyncRead: AsyncRead {
