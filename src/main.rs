@@ -88,7 +88,7 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
         .await
         .context("Failed to start scan")?;
 
-    let timeout = tokio::time::sleep(Duration::from_secs(4));
+    let timeout = tokio::time::sleep(Duration::from_secs(10));
     let find = find_inner(adapter, events, mac);
 
     let result = select! {
@@ -176,22 +176,27 @@ async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Re
 
     transport::ymodem::send_file(&mut uart_stream, filename, &mut Cursor::new(content)).await?;
 
+    let time = start.elapsed();
+
+    let start = Instant::now();
+
     let reply = device
         .recv_ctl()
         .await
         .context("Receiving the post-download status message")?;
     assert_eq!(reply.msg_type, ControlMessageType::Idle);
 
-    let time = start.elapsed();
+    let device_proc_time = start.elapsed();
 
     let speed = (content.len() as f64) / (time.as_secs_f64()) / 1024.0;
 
     info!(
-        "Uploaded {} ({}) in {:.2} seconds ({:.2} KiB/s)",
+        "Uploaded {} ({}) in {:.2} seconds ({:.2} KiB/s). Device processed it in {:.2} seconds",
         filename,
         humansize::format_size(content.len(), humansize::BINARY.decimal_zeroes(2)),
         time.as_secs_f64(),
-        speed
+        speed,
+        device_proc_time.as_secs_f64()
     );
 
     Ok(())
@@ -243,16 +248,30 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to initialize the device")?;
 
-    let res = receive_file(
-        &device,
-        "20230508021939.fit", // "user_profile.json",
-    )
-    .await;
+    let res = async {
+        receive_file(
+            &device,
+            "20230508021939.fit", // "user_profile.json",
+        )
+        .await?;
 
-    let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
-    send_file(&device, "user_profile.json", user_profile.as_bytes())
-        .await
-        .context("Failed to send the user profile")?;
+        // let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
+        // send_file(&device, "user_profile.json", user_profile.as_bytes())
+        //     .await
+        //     .context("Failed to send the user profile")?;
+
+        let offline_gnss_data = std::fs::read(
+            // "mgaoffline.ubx",
+            "2023-05-08.data",
+        )
+        .unwrap();
+        send_file(&device, "offline.gnss", &offline_gnss_data)
+            .await
+            .context("Failed to send the offline GNSS data")?;
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
 
     tokio::time::sleep(Duration::from_secs(10))
         .instrument(info_span!("final_sleep"))

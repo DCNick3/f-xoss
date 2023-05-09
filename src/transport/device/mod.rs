@@ -47,6 +47,9 @@ pub struct XossTransport {
     inner: Mutex<Inner>,
 }
 
+const NORMAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
+const FILE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
+
 impl XossTransport {
     #[instrument(skip(device), fields(id = %device.id()))]
     pub async fn new(device: Peripheral) -> Result<Self> {
@@ -171,7 +174,7 @@ impl XossTransport {
 
         inner
             .ctl_channel
-            .recv_ctl()
+            .recv_ctl(NORMAL_RESPONSE_TIMEOUT)
             .await
             .context("Reading control message")
     }
@@ -181,7 +184,9 @@ impl XossTransport {
         let mut inner = self.inner.lock().await;
         inner
             .ctl_channel
-            .recv_ctl()
+            // This API is used to wait for device to process the file after the file transfer
+            // it may take a while, hence the larger timeout
+            .recv_ctl(FILE_RESPONSE_TIMEOUT)
             .await
             .context("Reading (isolated) control message")
     }
@@ -215,8 +220,8 @@ impl CtlChannel {
         Ok(())
     }
 
-    pub async fn recv_ctl(&mut self) -> Result<RawControlMessage> {
-        let reply = self.recv_ctl_raw().await?;
+    pub async fn recv_ctl(&mut self, timeout: Duration) -> Result<RawControlMessage> {
+        let reply = self.recv_ctl_raw(timeout).await?;
 
         let checksum = reply[reply.len() - 1];
         let reply = &reply[..reply.len() - 1];
@@ -231,9 +236,9 @@ impl CtlChannel {
         Ok(reply)
     }
 
-    async fn recv_ctl_raw(&mut self) -> Result<Vec<u8>> {
+    async fn recv_ctl_raw(&mut self, timeout: Duration) -> Result<Vec<u8>> {
         let recv = self.ctl_recv.recv();
-        let timeout = tokio::time::sleep(Duration::from_secs(1));
+        let timeout = tokio::time::sleep(timeout);
 
         tokio::select! {
             recv = recv => recv.context("Failed to receive control reply"),
