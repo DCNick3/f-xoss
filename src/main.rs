@@ -1,22 +1,16 @@
 mod device;
 mod transport;
 
-use std::io::{Cursor, ErrorKind};
 use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
-use futures_util::{pin_mut, TryStreamExt};
-use tokio::io::AsyncReadExt;
 use tokio::select;
-use tokio::time::Instant;
 use tokio_stream::{Stream, StreamExt};
-use tokio_util::io::StreamReader;
 
-use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
-use crate::transport::{CtlBuffer, XossTransport};
+use crate::device::XossDevice;
 use tracing::{info, info_span, instrument, warn};
 use tracing_futures::Instrument;
 use tracing_indicatif::IndicatifLayer;
@@ -104,113 +98,6 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
     result
 }
 
-#[instrument(skip(device))]
-async fn receive_file(device: &XossTransport, filename: &str) -> Result<Vec<u8>> {
-    let mut uart_stream = device.open_uart_stream().await;
-
-    let start = Instant::now();
-
-    let mut buffer = CtlBuffer::default();
-    let reply = device
-        .request_ctl(
-            &mut buffer,
-            RawControlMessage {
-                msg_type: ControlMessageType::RequestReturn,
-                body: filename.as_bytes(),
-            },
-        )
-        .await
-        .context("Failed to send a control message")?
-        .expect_ok(ControlMessageType::Returning)?;
-    assert_eq!(reply, filename.as_bytes());
-
-    let (file_info, out_stream) = transport::ymodem::receive_file(&mut uart_stream).await?;
-    let reader =
-        StreamReader::new(out_stream.map_err(|e| std::io::Error::new(ErrorKind::Other, e)));
-    pin_mut!(reader);
-
-    info!(
-        "Downloading {} ({})",
-        filename,
-        humansize::format_size(file_info.size, humansize::BINARY.decimal_zeroes(2))
-    );
-
-    let mut buf = Vec::new();
-    reader
-        .read_to_end(&mut buf)
-        .await
-        .context("Failed to read the file")?;
-    drop(reader);
-
-    device
-        .recv_ctl(&mut buffer)
-        .await
-        .context("Receiving the post-download status message")?
-        .expect_ok(ControlMessageType::Idle)?;
-
-    let time = start.elapsed();
-
-    let speed = (buf.len() as f64) / (time.as_secs_f64()) / 1024.0;
-
-    info!(
-        "Downloaded {} ({}) in {:.2} seconds ({:.2} KiB/s)",
-        filename,
-        humansize::format_size(buf.len(), humansize::BINARY.decimal_zeroes(2)),
-        time.as_secs_f64(),
-        speed
-    );
-
-    Ok(buf)
-}
-
-#[instrument(skip(device, content))]
-async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Result<()> {
-    let mut uart_stream = device.open_uart_stream().await;
-
-    let start = Instant::now();
-
-    let mut buffer = CtlBuffer::default();
-    let reply = device
-        .request_ctl(
-            &mut buffer,
-            RawControlMessage {
-                msg_type: ControlMessageType::RequestSend,
-                body: filename.as_bytes(),
-            },
-        )
-        .await
-        .context("Failed to send a control message")?
-        .expect_ok(ControlMessageType::Accept)?;
-    assert_eq!(reply, filename.as_bytes());
-
-    transport::ymodem::send_file(&mut uart_stream, filename, &mut Cursor::new(content)).await?;
-
-    let time = start.elapsed();
-
-    let start = Instant::now();
-
-    device
-        .recv_ctl(&mut buffer)
-        .await
-        .context("Receiving the post-download status message")?
-        .expect_ok(ControlMessageType::Idle)?;
-
-    let device_proc_time = start.elapsed();
-
-    let speed = (content.len() as f64) / (time.as_secs_f64()) / 1024.0;
-
-    info!(
-        "Uploaded {} ({}) in {:.2} seconds ({:.2} KiB/s). Device processed it in {:.2} seconds",
-        filename,
-        humansize::format_size(content.len(), humansize::BINARY.decimal_zeroes(2)),
-        time.as_secs_f64(),
-        speed,
-        device_proc_time.as_secs_f64()
-    );
-
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(windows)]
@@ -253,16 +140,16 @@ async fn main() -> Result<()> {
         .context("Failed to connect to the device")?;
     info!("Connected to the device");
 
-    let device = XossTransport::new(device)
+    let device = XossDevice::new(device)
         .await
         .context("Failed to initialize the device")?;
 
     let res = async {
-        receive_file(
-            &device,
-            "20230508021939.fit", // "user_profile.json",
-        )
-        .await?;
+        device
+            .receive_file(
+                "20230508021939.fit", // "user_profile.json",
+            )
+            .await?;
 
         // let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
         // send_file(&device, "user_profile.json", user_profile.as_bytes())
@@ -274,7 +161,8 @@ async fn main() -> Result<()> {
             "2023-05-08.data",
         )
         .unwrap();
-        send_file(&device, "offline.gnss", &offline_gnss_data)
+        device
+            .send_file("offline.gnss", &offline_gnss_data)
             .await
             .context("Failed to send the offline GNSS data")?;
 
