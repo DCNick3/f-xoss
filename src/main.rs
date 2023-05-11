@@ -161,6 +161,9 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to set the time")?;
 
+        let header_json = device.get_device_json_header().await?;
+        info!("Device JSON header: {:#?}", header_json);
+
         let settings = device.read_settings().await?;
         info!("Settings: {:#?}", settings);
 
@@ -177,8 +180,19 @@ async fn main() -> Result<()> {
         };
         device.write_user_profile(&user_profile).await?;
 
+        let gear_profile = device.read_gear_profile().await?;
+        info!("Gear profile: {:#?}", gear_profile);
+
         let workouts = device.read_workouts().await?;
         info!("Workouts: {:#?}", workouts);
+
+        // we can't parse the panels (yet)
+        // well, writing a good editor is a lot of effort anyway, so prolly not gonna do it soon
+        let panels = device.read_file("panels.json").await?;
+        info!("Panels: {:}", String::from_utf8(panels).unwrap());
+
+        let routes = device.read_routes().await?;
+        info!("Routes: {:#?}", routes);
 
         device
             .read_file(

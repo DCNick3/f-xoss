@@ -6,7 +6,7 @@ use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 pub struct HeaderJson {
     pub device_model: String,
     pub sn: String,
-    #[serde(alias = "update_at")] // a typo that was fixed?..
+    #[serde(alias = "update_at")] // a typo that was fixed in some fw version?
     pub updated_at: i64,
     pub version: String,
 }
@@ -34,6 +34,7 @@ pub struct UserProfileInner {
     pub birthday: i64,
     pub gender: i64,
     pub height: i64,
+    /// Time zone offset in seconds
     pub time_zone: i64,
     pub weight: i64,
 }
@@ -54,9 +55,11 @@ pub struct UserProfile {
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum WorkoutState {
+    /// Finished recording, but was not downloaded from the device
     NotSynchronized = 0,
     Recording = 1,
     Syncing = 2,
+    /// Was downloaded from the device
     Synced = 3,
     Broken = 4,
 }
@@ -96,9 +99,12 @@ pub enum TemperatureUnit {
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Default)]
 #[repr(u8)]
 pub enum Backlight {
+    /// Disable backlight after some inactivity
     #[default]
     Auto = 0,
+    /// Keep backlight on
     AlwaysOn = 1,
+    /// Disable backlight
     Off = 2,
 }
 
@@ -118,9 +124,60 @@ pub struct Settings {
     pub temperature_unit: TemperatureUnit,
     /// This setting is not used by the device, set to 0
     pub time_formatter: u8,
+    /// Backlight mode
     pub backlight: Backlight,
+    /// Whether to auto-pause the workout when the speed is 0
     pub auto_pause: AutoPause,
     /// This setting is not used by the device, set to 0
     pub overwrite: u8,
+    /// Whether to play a tone when device keys are pressed
     pub keytone: bool,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GearType {
+    #[default]
+    Bike,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Gear {
+    pub gid: u32,
+    /// Weight of the bike, in grams (?)
+    pub weight: u32,
+    /// Wheel size, in mm
+    pub wheel_size: u32,
+    /// Whether the bike is active (?)
+    pub activated: bool,
+    /// Gear profile name
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_: GearType,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+pub enum SportType {
+    #[default]
+    Cycling,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Route {
+    /// Unique route identifier
+    pub rid: u64,
+    /// Size of the .ro file in bytes
+    pub size: u32,
+    pub source: u8, // No idea WTF is this
+    /// Route name
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_: SportType,
+    /// The version of the route format, only 2 supported by the device
+    #[serde(rename = "verison")] // yes, it's a typo
+    pub version: u8,
+    /// Route length, in meters
+    pub length: u32,
+    /// Route total elevation gain, in meters
+    pub gain: u32,
 }

@@ -5,7 +5,7 @@ use std::fmt::{Debug, Display};
 use std::io::{Cursor, ErrorKind};
 use std::time::SystemTime;
 
-use crate::model::{HeaderJson, Settings, UserProfile, WithHeader, WorkoutsItem};
+use crate::model::{Gear, HeaderJson, Route, Settings, UserProfile, WithHeader, WorkoutsItem};
 use crate::transport;
 use crate::transport::ctl_message::ControlMessageType;
 use anyhow::{Context, Result};
@@ -423,5 +423,40 @@ impl XossDevice {
         self.write_json_file("settings.json", &SettingsWrap { settings })
             .await
             .context("Failed to write settings")
+    }
+
+    pub async fn read_gear_profile(&self) -> Result<Vec<Gear>> {
+        #[derive(Deserialize)]
+        struct GearProfileWrap {
+            pub gears: Vec<Gear>,
+        }
+
+        self.read_json_file("gear_profile.json")
+            .await
+            .context("Failed to read gear profile")
+            .map(|g: GearProfileWrap| g.gears)
+    }
+
+    pub async fn write_gear_profile(&self, gears: &[Gear]) -> Result<()> {
+        #[derive(Serialize)]
+        struct GearProfileWrap<'a> {
+            pub gears: &'a [Gear],
+        }
+
+        self.write_json_file("gear_profile.json", &GearProfileWrap { gears })
+            .await
+            .context("Failed to write gear profile")
+    }
+
+    pub async fn read_routes(&self) -> Result<Vec<Route>> {
+        #[derive(Deserialize)]
+        struct RoutesWrap {
+            pub routes: Vec<Route>,
+        }
+
+        self.read_json_file("routebooks.json")
+            .await
+            .context("Failed to read routes")
+            .map(|r: RoutesWrap| r.routes)
     }
 }
