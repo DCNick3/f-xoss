@@ -1,21 +1,23 @@
 //! This module provides high-level device communication functions. They try to be atomic and leave the device in a consistent state.
 
 use crate::transport::{CtlBuffer, XossTransport, CTL_BUFFER_SIZE};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::io::{Cursor, ErrorKind};
 use std::time::SystemTime;
 
+use crate::model::{UserProfile, Workouts};
 use crate::transport;
 use crate::transport::ctl_message::ControlMessageType;
 use anyhow::{Context, Result};
 use btleplug::platform::Peripheral;
 use chrono::{NaiveDate, NaiveDateTime};
 use futures_util::{pin_mut, TryStreamExt};
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tokio_util::io::StreamReader;
-use tracing::{info, instrument, Span};
+use tracing::{info, instrument, trace, Span};
 
 pub struct XossDevice {
     // TODO: should we allow reconnecting? This might be a good place to do it
@@ -309,5 +311,50 @@ impl XossDevice {
         );
 
         Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn read_json_file<T: for<'de> Deserialize<'de>>(&self, filename: &str) -> Result<T> {
+        {
+            let data = self.receive_file(filename).await?;
+            let data =
+                std::str::from_utf8(&data).context("Failed to parse a json file as UTF-8")?;
+
+            trace!("Retrieved {}: {}", filename, data);
+
+            let profile = serde_json::from_str(data).context("Failed to parse the json file")?;
+
+            Ok::<_, anyhow::Error>(profile)
+        }
+        .with_context(|| format!("Failed to read {}", filename))
+    }
+
+    #[instrument(skip(self, data))]
+    pub async fn write_json_file<T: Serialize>(&self, filename: &str, data: &T) -> Result<()> {
+        let data = serde_json::to_string(data).context("Failed to serialize the json file")?;
+
+        trace!("Writing {}: {}", filename, data);
+
+        self.send_file(filename, data.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    pub async fn read_user_profile(&self) -> Result<UserProfile> {
+        self.read_json_file("user_profile.json")
+            .await
+            .context("Failed to read user profile")
+    }
+
+    pub async fn write_user_profile(&self, profile: &UserProfile) -> Result<()> {
+        self.write_json_file("user_profile.json", profile)
+            .await
+            .context("Failed to write user profile")
+    }
+
+    pub async fn read_workouts(&self) -> Result<Workouts> {
+        self.read_json_file("workouts.json")
+            .await
+            .context("Failed to read workouts")
     }
 }

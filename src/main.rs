@@ -1,4 +1,5 @@
 mod device;
+mod model;
 mod transport;
 
 use std::pin::Pin;
@@ -11,6 +12,7 @@ use tokio::select;
 use tokio_stream::{Stream, StreamExt};
 
 use crate::device::XossDevice;
+use crate::model::{User, UserProfile};
 use tracing::{info, info_span, instrument, warn};
 use tracing_futures::Instrument;
 use tracing_indicatif::IndicatifLayer;
@@ -154,16 +156,29 @@ async fn main() -> Result<()> {
         info!("Memory capacity: {}", device.get_memory_capacity().await?);
         info!("A-GPS status: {}", device.get_assisted_gnss_status().await?);
 
-        device.set_time(SystemTime::now())
+        device
+            .set_time(SystemTime::now())
             .await
             .context("Failed to set the time")?;
 
-        device.delete_file("user_profile.json").await.context("Failed to delete the user profile")?;
+        // device.delete_file("user_profile.json").await.context("Failed to delete the user profile")?;
 
-        let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
-        device.send_file("user_profile.json", user_profile.as_bytes())
-            .await
-            .context("Failed to send the user profile")?;
+        let user_profile = device.read_user_profile().await?;
+        info!("User profile: {:#?}", user_profile);
+
+        let user_profile = UserProfile {
+            device_info: None,
+            user: Some(User {
+                platform: "XOSS".to_string(),
+                uid: 42,
+                user_name: "ABOBA".to_string(),
+            }),
+            user_profile: Default::default(),
+        };
+        device.write_user_profile(&user_profile).await?;
+
+        let workouts = device.read_workouts().await?;
+        info!("Workouts: {:#?}", workouts);
 
         device
             .receive_file(
