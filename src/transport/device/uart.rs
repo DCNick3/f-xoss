@@ -14,7 +14,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::ReusableBoxFuture;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 pub struct UartChannel {
     shared: Arc<Shared>,
@@ -65,7 +65,7 @@ impl UartChannel {
                                 }
                             }
                         } else {
-                            debug!("Received data but no stream is open, dropping it");
+                            warn!("Received data but no stream is open, dropping it");
                         }
                     }
                 }

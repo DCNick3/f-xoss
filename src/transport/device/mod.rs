@@ -171,6 +171,20 @@ impl XossTransport {
                         let new_battery_level = data[0] as u32;
                         trace!("Battery level: {}", new_battery_level);
                         battery_level_copy.store(new_battery_level, Ordering::Relaxed);
+                    }
+                    // for some reason we are getting notifications for these, even though we are not subscribed to them
+                    else if matches!(
+                        characteristic,
+                        FIRMWARE_REVISION_CHARACTERISTIC_UUID
+                            | MANUFACTURER_NAME_CHARACTERISTIC_UUID
+                            | MODEL_NUMBER_CHARACTERISTIC_UUID
+                            | HARDWARE_REVISION_CHARACTERISTIC_UUID
+                            | SERIAL_NUMBER_CHARACTERISTIC_UUID
+                    ) {
+                        debug!(
+                            "Ignoring notification for characteristic: {}",
+                            characteristic
+                        )
                     } else {
                         warn!("Unknown notification: {:?}", notification);
                     };

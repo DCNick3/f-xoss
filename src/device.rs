@@ -9,6 +9,7 @@ use crate::transport;
 use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
 use anyhow::{Context, Result};
 use btleplug::platform::Peripheral;
+use chrono::{NaiveDate, NaiveDateTime};
 use futures_util::{pin_mut, TryStreamExt};
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
@@ -37,6 +38,21 @@ impl Display for MemoryCapacity {
             humansize::format_size(self.total_kb as u64 * 1024, humansize::BINARY),
             (self.total_kb - self.free_kb) as f32 / self.total_kb as f32 * 100.0
         )
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AssistedGnssState {
+    MissingData,
+    ValidUntil(NaiveDate),
+}
+
+impl Display for AssistedGnssState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssistedGnssState::MissingData => write!(f, "A-GNSS data missing"),
+            AssistedGnssState::ValidUntil(date) => write!(f, "Valid until {}", date),
+        }
     }
 }
 
@@ -139,6 +155,39 @@ impl XossDevice {
             .context("Failed to set the time")
             .map(|b| {
                 assert_eq!(b, unix_time.to_le_bytes().as_ref());
+            })
+    }
+
+    pub async fn get_assisted_gnss_status(&self) -> Result<AssistedGnssState> {
+        let transport = self.transport.lock().await;
+        let mut buffer = [0; CTL_BUFFER_SIZE];
+        transport
+            .request_ctl(
+                &mut buffer,
+                RawControlMessage {
+                    msg_type: ControlMessageType::RequestMga,
+                    body: &[],
+                },
+            )
+            .await
+            .context("Failed to send a control message")?
+            .expect_ok(ControlMessageType::ReturnMga)
+            .context("Failed to get the assisted GPS status")
+            .and_then(|b| {
+                assert_eq!(b.len(), 6);
+                assert_eq!(b[0], 0x01);
+                assert_eq!(b[1], 0x00);
+                let time = u32::from_le_bytes([b[2], b[3], b[4], b[5]]);
+                if time == 0 {
+                    Ok(AssistedGnssState::MissingData)
+                } else {
+                    // convert unix time to NaiveDate
+                    Ok(AssistedGnssState::ValidUntil(
+                        NaiveDateTime::from_timestamp_opt(time as i64, 0)
+                            .unwrap()
+                            .date(),
+                    ))
+                }
             })
     }
 

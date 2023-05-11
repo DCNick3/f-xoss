@@ -98,6 +98,9 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
     result
 }
 
+const DEFAULT_ENV_FILTER: &str = "info";
+// const DEFAULT_ENV_FILTER: &str = "debug";
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(windows)]
@@ -106,7 +109,7 @@ async fn main() -> Result<()> {
     let indicatif_layer = IndicatifLayer::new();
 
     tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"))
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_ENV_FILTER))
         .with_subscriber(
             tracing_subscriber::registry()
                 .with(
@@ -149,6 +152,7 @@ async fn main() -> Result<()> {
         info!("Battery level: {:?}", device.battery_level().await);
 
         info!("Memory capacity: {}", device.get_memory_capacity().await?);
+        info!("A-GPS status: {}", device.get_assisted_gnss_status().await?);
 
         device.set_time(SystemTime::now())
             .await
