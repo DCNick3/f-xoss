@@ -74,6 +74,7 @@ impl UartChannel {
 
         Self {
             shared,
+            // FIXME: actually use MTU from the BT stack when it's implemented in btleplug or find a better way idk
             mtu: 206,
             tx_characteristic,
             stream_sender,
