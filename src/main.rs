@@ -15,10 +15,9 @@ use tokio_stream::{Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
 use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
-use crate::transport::device::XossTransport;
-use tracing::{info, info_span, instrument, warn, Span};
+use crate::transport::device::{CtlBuffer, XossTransport};
+use tracing::{info, info_span, instrument, warn};
 use tracing_futures::Instrument;
-use tracing_indicatif::span_ext::IndicatifSpanExt;
 use tracing_indicatif::IndicatifLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -110,12 +109,15 @@ async fn receive_file(device: &XossTransport, filename: &str) -> Result<Vec<u8>>
 
     let start = Instant::now();
 
+    let mut buffer = CtlBuffer::default();
     let reply = device
-        .request_ctl(RawControlMessage {
-            msg_type: ControlMessageType::RequestReturn,
-            // body: (*b"workouts.json").into(),
-            body: filename.into(),
-        })
+        .request_ctl(
+            &mut buffer,
+            RawControlMessage {
+                msg_type: ControlMessageType::RequestReturn,
+                body: filename.as_bytes(),
+            },
+        )
         .await
         .context("Failed to send a control message")?;
     assert_eq!(reply.msg_type, ControlMessageType::Returning);
@@ -139,7 +141,7 @@ async fn receive_file(device: &XossTransport, filename: &str) -> Result<Vec<u8>>
     drop(reader);
 
     let reply = device
-        .recv_ctl()
+        .recv_ctl(&mut buffer)
         .await
         .context("Receiving the post-download status message")?;
     assert_eq!(reply.msg_type, ControlMessageType::Idle);
@@ -165,11 +167,15 @@ async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Re
 
     let start = Instant::now();
 
+    let mut buffer = CtlBuffer::default();
     let reply = device
-        .request_ctl(RawControlMessage {
-            msg_type: ControlMessageType::RequestSend,
-            body: filename.into(),
-        })
+        .request_ctl(
+            &mut buffer,
+            RawControlMessage {
+                msg_type: ControlMessageType::RequestSend,
+                body: filename.as_bytes(),
+            },
+        )
         .await
         .context("Failed to send a control message")?;
     assert_eq!(reply.msg_type, ControlMessageType::Accept);
@@ -181,7 +187,7 @@ async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Re
     let start = Instant::now();
 
     let reply = device
-        .recv_ctl()
+        .recv_ctl(&mut buffer)
         .await
         .context("Receiving the post-download status message")?;
     assert_eq!(reply.msg_type, ControlMessageType::Idle);

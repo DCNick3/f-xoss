@@ -1,9 +1,8 @@
-use binrw::io::NoSeek;
-use binrw::{BinRead, BinResult, BinWrite, Endian};
-use std::io::Write;
+use anyhow::{bail, Context, Result};
+use num_enum::TryFromPrimitive;
 
-#[derive(BinRead, BinWrite, Debug, PartialEq, Eq, Clone, Copy)]
-#[brw(repr(u8))]
+#[derive(TryFromPrimitive, Debug, PartialEq, Eq, Clone, Copy)]
+#[repr(u8)]
 pub enum ControlMessageType {
     /// Returns a device identifier (8 hex bytes
     DbgCmd = 0x0,
@@ -67,68 +66,56 @@ pub enum ControlMessageType {
     StatusReturn = 0xFF,
 }
 
-#[derive(BinRead, BinWrite, Debug)]
-#[br(import(len: usize))]
-pub struct RawControlMessage {
+#[derive(Debug)]
+pub struct RawControlMessage<'a> {
     pub msg_type: ControlMessageType,
-    #[br(count = len - 1)]
-    pub body: Vec<u8>,
+    pub body: &'a [u8],
 }
 
-pub fn partial_checksum(buf: &[u8]) -> u8 {
+fn calc_checksum(buf: &[u8]) -> u8 {
     buf.iter().fold(0, |acc, x| acc ^ x)
 }
 
-/// Adds checksum to the data
-///
-/// The checksum is calculated by XORing all bytes in the data
-pub struct CheckSummed<T>(pub T);
+impl<'a> RawControlMessage<'a> {
+    pub fn read(buf: &'a [u8]) -> Result<Self> {
+        let len = buf.len();
 
-struct ChecksumWriter<W> {
-    writer: W,
-    checksum: u8,
-}
+        let msg_type = buf[0];
+        let data = &buf[1..len - 1];
+        let checksum = buf[len - 1];
 
-impl<W> ChecksumWriter<W> {
-    fn new(writer: W) -> Self {
-        Self {
-            writer,
-            checksum: 0,
+        let msg_type = ControlMessageType::try_from_primitive(msg_type)
+            .with_context(|| format!("Unknown message type: {}", msg_type))?;
+
+        let expected_checksum = calc_checksum(&buf[..len - 1]);
+        if checksum != expected_checksum {
+            bail!(
+                "Invalid checksum: expected {:02X}, got {:02X}",
+                expected_checksum,
+                checksum
+            );
         }
+
+        Ok(Self {
+            msg_type,
+            body: data,
+        })
     }
 
-    fn checksum(&self) -> u8 {
-        self.checksum
-    }
-}
+    pub fn write<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8]> {
+        let len = self.body.len();
+        assert!(
+            len + 2 <= buf.len(),
+            "Message too long ({} > {})",
+            len + 2,
+            buf.len()
+        );
 
-impl<W: Write> Write for ChecksumWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.checksum ^= partial_checksum(buf);
-        Write::write(&mut self.writer, buf)
-    }
+        buf[0] = self.msg_type as u8;
+        buf[1..len + 1].copy_from_slice(self.body);
+        buf[len + 1] = calc_checksum(&buf[..len + 1]);
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.flush()
-    }
-}
-
-impl<T: BinWrite> BinWrite for CheckSummed<T> {
-    type Args<'a> = T::Args<'a>;
-
-    fn write_options<W: Write>(
-        &self,
-        writer: &mut W,
-        endian: Endian,
-        options: Self::Args<'_>,
-    ) -> BinResult<()> {
-        let mut writer = NoSeek::new(ChecksumWriter::new(writer));
-        self.0.write_options(&mut writer, endian, options)?;
-
-        let checksum = writer.get_ref().checksum();
-        checksum.write_options(&mut writer, endian, ())?;
-
-        Ok(())
+        Ok(&buf[..len + 2])
     }
 }
 

@@ -1,21 +1,20 @@
+mod ctl;
 mod uart;
 
-use super::ctl_message::{partial_checksum, CheckSummed, RawControlMessage};
+use super::ctl_message::RawControlMessage;
+pub use ctl::{CtlBuffer, CTL_BUFFER_SIZE};
 use uart::UartChannel;
 pub use uart::UartStream;
 
 use std::collections::BTreeMap;
-use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use binrw::io::NoSeek;
-use binrw::{BinRead, BinWrite};
-use btleplug::api::{Characteristic, Peripheral as _, WriteType};
+use btleplug::api::Peripheral as _;
 use btleplug::platform::Peripheral;
+use ctl::CtlChannel;
 use futures_util::future::{AbortHandle, Abortable};
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, instrument, trace, warn, Level};
@@ -24,12 +23,6 @@ use uuid::Uuid;
 const TX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400002_b5a3_f393_e0a9_e50e24dcca9e);
 const RX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400003_b5a3_f393_e0a9_e50e24dcca9e);
 const CTL_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400004_b5a3_f393_e0a9_e50e24dcca9e);
-
-struct CtlChannel {
-    shared: Arc<Shared>,
-    ctl_characteristic: Characteristic,
-    ctl_recv: Receiver<Vec<u8>>,
-}
 
 struct Shared {
     device: Peripheral,
@@ -146,11 +139,7 @@ impl XossTransport {
             // mutex is needed to ensure that we receive the correct reply
             // (we don't allow sending a new command until the previous one is replied to)
             inner: Mutex::new(Inner {
-                ctl_channel: CtlChannel {
-                    shared: shared.clone(),
-                    ctl_characteristic,
-                    ctl_recv,
-                },
+                ctl_channel: CtlChannel::new(shared.clone(), ctl_characteristic, ctl_recv),
                 uart_channel: UartChannel::new(
                     shared,
                     tx_characteristic,
@@ -163,30 +152,34 @@ impl XossTransport {
         Ok(result)
     }
 
-    #[instrument(skip(self), ret, level = Level::DEBUG)]
-    pub async fn request_ctl(&self, message: RawControlMessage) -> Result<RawControlMessage> {
+    #[instrument(skip(self, buffer), ret, level = Level::DEBUG)]
+    pub async fn request_ctl<'a>(
+        &self,
+        buffer: &'a mut CtlBuffer,
+        message: RawControlMessage<'_>,
+    ) -> Result<RawControlMessage<'a>> {
         let mut inner = self.inner.lock().await;
         inner
             .ctl_channel
-            .send_ctl(message)
+            .send_ctl(buffer, message)
             .await
             .context("Sending control message")?;
 
         inner
             .ctl_channel
-            .recv_ctl(NORMAL_RESPONSE_TIMEOUT)
+            .recv_ctl(buffer, NORMAL_RESPONSE_TIMEOUT)
             .await
             .context("Reading control message")
     }
 
-    #[instrument(skip(self), ret, level = Level::DEBUG)]
-    pub async fn recv_ctl(&self) -> Result<RawControlMessage> {
+    #[instrument(skip(self, buffer), ret, level = Level::DEBUG)]
+    pub async fn recv_ctl<'a>(&self, buffer: &'a mut CtlBuffer) -> Result<RawControlMessage<'a>> {
         let mut inner = self.inner.lock().await;
         inner
             .ctl_channel
             // This API is used to wait for device to process the file after the file transfer
             // it may take a while, hence the larger timeout
-            .recv_ctl(FILE_RESPONSE_TIMEOUT)
+            .recv_ctl(buffer, FILE_RESPONSE_TIMEOUT)
             .await
             .context("Reading (isolated) control message")
     }
@@ -198,64 +191,6 @@ impl XossTransport {
 
     pub async fn disconnect(self) -> Result<()> {
         self.shared.device.disconnect().await?;
-
-        Ok(())
-    }
-}
-
-impl CtlChannel {
-    pub async fn send_ctl(&mut self, message: RawControlMessage) -> Result<()> {
-        // TODO: we may have troubles handling failures after sending but before receiving the reply
-        // maybe send the command reset if it happens?
-
-        let mut buffer = Vec::new();
-        CheckSummed(message)
-            .write_le(&mut NoSeek::new(&mut buffer))
-            .context("Encoding message")?;
-
-        self.send_ctl_raw(&buffer)
-            .await
-            .context("Sending the message & receiving reply")?;
-
-        Ok(())
-    }
-
-    pub async fn recv_ctl(&mut self, timeout: Duration) -> Result<RawControlMessage> {
-        let reply = self.recv_ctl_raw(timeout).await?;
-
-        let checksum = reply[reply.len() - 1];
-        let reply = &reply[..reply.len() - 1];
-
-        if checksum != partial_checksum(reply) {
-            bail!("Invalid checksum in reply");
-        }
-
-        let reply = RawControlMessage::read_le_args(&mut Cursor::new(reply), (reply.len(),))
-            .context("Decoding reply")?;
-
-        Ok(reply)
-    }
-
-    async fn recv_ctl_raw(&mut self, timeout: Duration) -> Result<Vec<u8>> {
-        let recv = self.ctl_recv.recv();
-        let timeout = tokio::time::sleep(timeout);
-
-        tokio::select! {
-            recv = recv => recv.context("Failed to receive control reply"),
-            _ = timeout => bail!("Timeout waiting for control reply"),
-        }
-    }
-
-    async fn send_ctl_raw(&mut self, message: &[u8]) -> Result<()> {
-        if message.len() > 20 {
-            bail!("Control message too long");
-        }
-
-        self.shared
-            .device
-            .write(&self.ctl_characteristic, message, WriteType::WithResponse)
-            .await
-            .context("Failed to send control message")?;
 
         Ok(())
     }

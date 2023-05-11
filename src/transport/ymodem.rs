@@ -14,6 +14,7 @@ use tracing_futures::Instrument;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 #[derive(Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Error {
     #[error("Invalid start byte")]
     InvalidStart,
@@ -30,7 +31,7 @@ const STX: u8 = 0x02;
 const EOT: u8 = 0x04;
 const ACK: u8 = 0x06;
 const NAK: u8 = 0x15;
-const CAN: u8 = 0x18;
+// const CAN: u8 = 0x18;
 
 pub const MAX_PACKET_SIZE: usize = 1024 + 5;
 pub const SMALL_DATA_SIZE: usize = 128;
