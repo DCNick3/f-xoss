@@ -6,7 +6,7 @@ use std::io::{Cursor, ErrorKind};
 use std::time::SystemTime;
 
 use crate::transport;
-use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
+use crate::transport::ctl_message::ControlMessageType;
 use anyhow::{Context, Result};
 use btleplug::platform::Peripheral;
 use chrono::{NaiveDate, NaiveDateTime};
@@ -62,27 +62,15 @@ impl XossDevice {
 
         let mut buffer = [0; CTL_BUFFER_SIZE];
         if transport
-            .request_ctl(
-                &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::StatusReturn,
-                    body: &[],
-                },
-            )
+            .request_ctl(&mut buffer, ControlMessageType::StatusReturn, &[])
             .await
             .context("Getting transfer status")?
-            .msg_type
+            .message_type
             != ControlMessageType::Idle
         {
             info!("Device has an active transfer, stopping it");
             transport
-                .request_ctl(
-                    &mut buffer,
-                    RawControlMessage {
-                        msg_type: ControlMessageType::RequestStop,
-                        body: &[],
-                    },
-                )
+                .request_ctl(&mut buffer, ControlMessageType::RequestStop, &[])
                 .await
                 .context("Stopping the transfer")?
                 .expect_ok(ControlMessageType::Idle)
@@ -114,13 +102,7 @@ impl XossDevice {
         let transport = self.transport.lock().await;
         let mut buffer = [0; CTL_BUFFER_SIZE];
         transport
-            .request_ctl(
-                &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::RequestCap,
-                    body: &[],
-                },
-            )
+            .request_ctl(&mut buffer, ControlMessageType::RequestCap, &[])
             .await
             .context("Failed to send a control message")?
             .expect_ok(ControlMessageType::ReturnCap)
@@ -148,10 +130,8 @@ impl XossDevice {
         transport
             .request_ctl(
                 &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::RequestDel,
-                    body: filename.as_bytes(),
-                },
+                ControlMessageType::RequestDel,
+                filename.as_bytes(),
             )
             .await
             .context("Failed to send a control message")?
@@ -175,10 +155,8 @@ impl XossDevice {
         transport
             .request_ctl(
                 &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::TimeSet,
-                    body: unix_time.to_le_bytes().as_ref(),
-                },
+                ControlMessageType::TimeSet,
+                unix_time.to_le_bytes().as_ref(),
             )
             .await
             .context("Failed to send a control message")?
@@ -193,13 +171,7 @@ impl XossDevice {
         let transport = self.transport.lock().await;
         let mut buffer = [0; CTL_BUFFER_SIZE];
         transport
-            .request_ctl(
-                &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::RequestMga,
-                    body: &[],
-                },
-            )
+            .request_ctl(&mut buffer, ControlMessageType::RequestMga, &[])
             .await
             .context("Failed to send a control message")?
             .expect_ok(ControlMessageType::ReturnMga)
@@ -236,10 +208,8 @@ impl XossDevice {
         let reply = transport
             .request_ctl(
                 &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::RequestReturn,
-                    body: filename.as_bytes(),
-                },
+                ControlMessageType::RequestReturn,
+                filename.as_bytes(),
             )
             .await
             .context("Failed to send a control message")?
@@ -299,10 +269,8 @@ impl XossDevice {
         let reply = device
             .request_ctl(
                 &mut buffer,
-                RawControlMessage {
-                    msg_type: ControlMessageType::RequestSend,
-                    body: filename.as_bytes(),
-                },
+                ControlMessageType::RequestSend,
+                filename.as_bytes(),
             )
             .await
             .context("Failed to send a control message")?

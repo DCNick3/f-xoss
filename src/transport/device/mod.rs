@@ -20,6 +20,7 @@ use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, instrument, trace, warn, Level};
 use uuid::Uuid;
+use crate::transport::ctl_message::ControlMessageType;
 
 const TX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400002_b5a3_f393_e0a9_e50e24dcca9e);
 const RX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400003_b5a3_f393_e0a9_e50e24dcca9e);
@@ -310,9 +311,16 @@ impl XossTransport {
     pub async fn request_ctl<'a>(
         &self,
         buffer: &'a mut CtlBuffer,
-        message: RawControlMessage<'_>,
+        message_type: ControlMessageType,
+        body: &[u8],
     ) -> Result<RawControlMessage<'a>> {
+        let message = RawControlMessage {
+            message_type,
+            body,
+        }; 
+        
         let mut inner = self.inner.lock().await;
+        
         inner
             .ctl_channel
             .send_ctl(buffer, message)

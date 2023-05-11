@@ -69,7 +69,7 @@ pub enum ControlMessageType {
 
 #[derive(Debug)]
 pub struct RawControlMessage<'a> {
-    pub msg_type: ControlMessageType,
+    pub message_type: ControlMessageType,
     pub body: &'a [u8],
 }
 
@@ -98,7 +98,7 @@ impl<'a> RawControlMessage<'a> {
         }
 
         Ok(Self {
-            msg_type,
+            message_type: msg_type,
             body: data,
         })
     }
@@ -112,7 +112,7 @@ impl<'a> RawControlMessage<'a> {
             buf.len()
         );
 
-        buf[0] = self.msg_type as u8;
+        buf[0] = self.message_type as u8;
         buf[1..len + 1].copy_from_slice(self.body);
         buf[len + 1] = calc_checksum(&buf[..len + 1]);
 
@@ -121,7 +121,7 @@ impl<'a> RawControlMessage<'a> {
 
     pub fn into_result(self) -> Result<RawControlMessage<'a>, ControlError> {
         use ControlMessageType::*;
-        match self.msg_type {
+        match self.message_type {
             ErrVali => Err(ControlError::Validation),
             ErrNoFile => Err(ControlError::NoFile(
                 std::str::from_utf8(self.body)
@@ -148,8 +148,8 @@ impl<'a> RawControlMessage<'a> {
 
     pub fn expect_ok(mut self, ty: ControlMessageType) -> Result<&'a [u8]> {
         self = self.into_result().context("Error response")?;
-        if self.msg_type != ty {
-            bail!("Expected {:?}, got {:?}", ty, self.msg_type);
+        if self.message_type != ty {
+            bail!("Expected {:?}, got {:?}", ty, self.message_type);
         }
         Ok(self.body)
     }
