@@ -94,6 +94,26 @@ impl XossDevice {
             })
     }
 
+    pub async fn delete_file(&self, filename: &str) -> Result<()> {
+        let transport = self.transport.lock().await;
+        let mut buffer = [0; CTL_BUFFER_SIZE];
+        transport
+            .request_ctl(
+                &mut buffer,
+                RawControlMessage {
+                    msg_type: ControlMessageType::RequestDel,
+                    body: filename.as_bytes(),
+                },
+            )
+            .await
+            .context("Failed to send a control message")?
+            .expect_ok(ControlMessageType::DelSuccess)
+            .context("Failed to delete the file")
+            .map(|b| {
+                assert_eq!(b, filename.as_bytes());
+            })
+    }
+
     #[instrument(skip(self))]
     pub async fn receive_file(&self, filename: &str) -> Result<Vec<u8>> {
         // even though the underlying implementation of ymodem returns a stream, allowing us to stream the file, we don't do that here

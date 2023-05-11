@@ -150,16 +150,18 @@ async fn main() -> Result<()> {
 
         info!("Memory capacity: {}", device.get_memory_capacity().await?);
 
+        device.delete_file("user_profile.json").await.context("Failed to delete the user profile")?;
+
+        let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
+        device.send_file("user_profile.json", user_profile.as_bytes())
+            .await
+            .context("Failed to send the user profile")?;
+
         device
             .receive_file(
                 "20230508021939.fit", // "user_profile.json",
             )
             .await?;
-
-        // let user_profile = r#"{"device_model":"A1","sn":"797003","updated_at":1683590162,"user":{"platform":"XOSS","uid":42,"user_name":"ABOBA"},"user_profile":{"ALAHR":0,"ALASPEED":0,"FTP":120,"LTHR":160,"MAXHR":200,"birthday":129105920,"gender":0,"height":0,"time_zone":10800,"weight":75000},"version":"2.0.0"}"#;
-        // send_file(&device, "user_profile.json", user_profile.as_bytes())
-        //     .await
-        //     .context("Failed to send the user profile")?;
 
         let offline_gnss_data = std::fs::read(
             // "mgaoffline.ubx",
