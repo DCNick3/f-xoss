@@ -1,6 +1,7 @@
 //! This module provides high-level device communication functions. They try to be atomic and leave the device in a consistent state.
 
-use crate::transport::{CtlBuffer, XossTransport};
+use crate::transport::{CtlBuffer, XossTransport, CTL_BUFFER_SIZE};
+use std::fmt::Display;
 use std::io::{Cursor, ErrorKind};
 
 use crate::transport;
@@ -18,6 +19,24 @@ pub struct XossDevice {
     // TODO: should we allow reconnecting? This might be a good place to do it
     // This would also necessitate BLE disconnect detection
     transport: Mutex<XossTransport>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemoryCapacity {
+    pub free_kb: u32,
+    pub total_kb: u32,
+}
+
+impl Display for MemoryCapacity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} / {} ({:.02}% used)",
+            humansize::format_size(self.free_kb as u64 * 1024, humansize::BINARY),
+            humansize::format_size(self.total_kb as u64 * 1024, humansize::BINARY),
+            (self.total_kb - self.free_kb) as f32 / self.total_kb as f32 * 100.0
+        )
+    }
 }
 
 impl XossDevice {
@@ -41,6 +60,38 @@ impl XossDevice {
     pub async fn battery_level(&self) -> u32 {
         let transport = self.transport.lock().await;
         transport.battery_level()
+    }
+
+    pub async fn get_memory_capacity(&self) -> Result<MemoryCapacity> {
+        let transport = self.transport.lock().await;
+        let mut buffer = [0; CTL_BUFFER_SIZE];
+        transport
+            .request_ctl(
+                &mut buffer,
+                RawControlMessage {
+                    msg_type: ControlMessageType::RequestCap,
+                    body: &[],
+                },
+            )
+            .await
+            .context("Failed to send a control message")?
+            .expect_ok(ControlMessageType::ReturnCap)
+            .context("Failed to get memory capacity")
+            .and_then(|b| {
+                std::str::from_utf8(b).context("Failed to parse the capacity string as UTF-8")
+            })
+            .and_then(|s| {
+                let (left, right) = s
+                    .split_once('/')
+                    .context("Failed to parse the capacity string")?;
+                let free_kb = left
+                    .parse::<u32>()
+                    .context("Failed to parse the free capacity")?;
+                let total_kb = right
+                    .parse::<u32>()
+                    .context("Failed to parse the total capacity")?;
+                Ok(MemoryCapacity { free_kb, total_kb })
+            })
     }
 
     #[instrument(skip(self))]

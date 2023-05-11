@@ -148,6 +148,8 @@ async fn main() -> Result<()> {
         info!("Device information: {:#?}", device.device_info().await);
         info!("Battery level: {:?}", device.battery_level().await);
 
+        info!("Memory capacity: {}", device.get_memory_capacity().await?);
+
         device
             .receive_file(
                 "20230508021939.fit", // "user_profile.json",
