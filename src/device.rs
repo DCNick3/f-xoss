@@ -15,7 +15,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tokio_util::io::StreamReader;
-use tracing::{info, instrument};
+use tracing::{info, instrument, Span};
 
 pub struct XossDevice {
     // TODO: should we allow reconnecting? This might be a good place to do it
@@ -204,25 +204,25 @@ impl XossDevice {
             .context("Failed to send a control message")?
             .expect_ok(ControlMessageType::ReturnMga)
             .context("Failed to get the assisted GPS status")
-            .and_then(|b| {
+            .map(|b| {
                 assert_eq!(b.len(), 6);
                 assert_eq!(b[0], 0x01);
                 assert_eq!(b[1], 0x00);
                 let time = u32::from_le_bytes([b[2], b[3], b[4], b[5]]);
                 if time == 0 {
-                    Ok(AssistedGnssState::MissingData)
+                    AssistedGnssState::MissingData
                 } else {
                     // convert unix time to NaiveDate
-                    Ok(AssistedGnssState::ValidUntil(
+                    AssistedGnssState::ValidUntil(
                         NaiveDateTime::from_timestamp_opt(time as i64, 0)
                             .unwrap()
                             .date(),
-                    ))
+                    )
                 }
             })
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(size))]
     pub async fn receive_file(&self, filename: &str) -> Result<Vec<u8>> {
         // even though the underlying implementation of ymodem returns a stream, allowing us to stream the file, we don't do that here
         // it introduces problems with atomicity and will punch us in the face when we try to implement retries
@@ -250,6 +250,8 @@ impl XossDevice {
         let reader =
             StreamReader::new(out_stream.map_err(|e| std::io::Error::new(ErrorKind::Other, e)));
         pin_mut!(reader);
+
+        Span::current().record("size", file_info.size);
 
         info!(
             "Downloading {} ({})",
@@ -285,7 +287,7 @@ impl XossDevice {
         Ok(buf)
     }
 
-    #[instrument(skip(self, content))]
+    #[instrument(skip(self, content), fields(size = content.len()))]
     pub async fn send_file(&self, filename: &str, content: &[u8]) -> Result<()> {
         // we accept the file as a slice, for motivation see the comment in [receive_file]
         let device = self.transport.lock().await;
@@ -306,6 +308,12 @@ impl XossDevice {
             .context("Failed to send a control message")?
             .expect_ok(ControlMessageType::Accept)?;
         assert_eq!(reply, filename.as_bytes());
+
+        info!(
+            "Uploading {} ({})",
+            filename,
+            humansize::format_size(content.len(), humansize::BINARY.decimal_zeroes(2))
+        );
 
         transport::ymodem::send_file(&mut uart_stream, filename, &mut Cursor::new(content)).await?;
 
