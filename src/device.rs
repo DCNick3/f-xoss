@@ -58,8 +58,39 @@ impl Display for AssistedGnssState {
 
 impl XossDevice {
     pub async fn new(peripheral: Peripheral) -> Result<Self> {
+        let transport = XossTransport::new(peripheral).await?;
+
+        let mut buffer = [0; CTL_BUFFER_SIZE];
+        if transport
+            .request_ctl(
+                &mut buffer,
+                RawControlMessage {
+                    msg_type: ControlMessageType::StatusReturn,
+                    body: &[],
+                },
+            )
+            .await
+            .context("Getting transfer status")?
+            .msg_type
+            != ControlMessageType::Idle
+        {
+            info!("Device has an active transfer, stopping it");
+            transport
+                .request_ctl(
+                    &mut buffer,
+                    RawControlMessage {
+                        msg_type: ControlMessageType::RequestStop,
+                        body: &[],
+                    },
+                )
+                .await
+                .context("Stopping the transfer")?
+                .expect_ok(ControlMessageType::Idle)
+                .context("Failed to stop the transfer")?;
+        }
+
         Ok(Self {
-            transport: Mutex::new(XossTransport::new(peripheral).await?),
+            transport: Mutex::new(transport),
         })
     }
 
