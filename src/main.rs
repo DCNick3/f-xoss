@@ -2,7 +2,7 @@ mod device;
 mod transport;
 
 use std::pin::Pin;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
@@ -149,6 +149,10 @@ async fn main() -> Result<()> {
         info!("Battery level: {:?}", device.battery_level().await);
 
         info!("Memory capacity: {}", device.get_memory_capacity().await?);
+
+        device.set_time(SystemTime::now())
+            .await
+            .context("Failed to set the time")?;
 
         device.delete_file("user_profile.json").await.context("Failed to delete the user profile")?;
 

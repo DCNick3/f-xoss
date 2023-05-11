@@ -3,6 +3,7 @@
 use crate::transport::{CtlBuffer, XossTransport, CTL_BUFFER_SIZE};
 use std::fmt::Display;
 use std::io::{Cursor, ErrorKind};
+use std::time::SystemTime;
 
 use crate::transport;
 use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
@@ -111,6 +112,33 @@ impl XossDevice {
             .context("Failed to delete the file")
             .map(|b| {
                 assert_eq!(b, filename.as_bytes());
+            })
+    }
+
+    pub async fn set_time(&self, time: SystemTime) -> Result<()> {
+        let unix_time: u32 = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .context("Failed to convert the time to UNIX timestamp")?
+            .as_secs()
+            .try_into()
+            .expect("It's that time of the year again... (the unix timestamp has overflowed unsigned 32-bit integer)");
+
+        let transport = self.transport.lock().await;
+        let mut buffer = [0; CTL_BUFFER_SIZE];
+        transport
+            .request_ctl(
+                &mut buffer,
+                RawControlMessage {
+                    msg_type: ControlMessageType::TimeSet,
+                    body: unix_time.to_le_bytes().as_ref(),
+                },
+            )
+            .await
+            .context("Failed to send a control message")?
+            .expect_ok(ControlMessageType::TimeSetRtn)
+            .context("Failed to set the time")
+            .map(|b| {
+                assert_eq!(b, unix_time.to_le_bytes().as_ref());
             })
     }
 
