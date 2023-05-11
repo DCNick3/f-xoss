@@ -54,11 +54,11 @@ pub struct UserProfile {
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum WorkoutState {
-    NotSyncronized,
-    Recording,
-    Syncing,
-    Synced,
-    Broken,
+    NotSynchronized = 0,
+    Recording = 1,
+    Syncing = 2,
+    Synced = 3,
+    Broken = 4,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Debug, Clone)]
@@ -68,7 +68,59 @@ pub struct WorkoutsItem {
     pub state: WorkoutState,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Workouts {
-    pub workouts: Vec<WorkoutsItem>,
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+pub enum Language {
+    #[serde(rename = "en")]
+    #[default]
+    English,
+    #[serde(rename = "zh-cn")]
+    Chinese,
+}
+
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Default)]
+#[repr(u8)]
+pub enum DistanceUnit {
+    #[default]
+    Metric = 0,
+    Imperial = 1,
+}
+
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Default)]
+#[repr(u8)]
+pub enum TemperatureUnit {
+    #[default]
+    Celsius = 0,
+    Fahrenheit = 1,
+}
+
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Default)]
+#[repr(u8)]
+pub enum Backlight {
+    #[default]
+    Auto = 0,
+    AlwaysOn = 1,
+    Off = 2,
+}
+
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Default)]
+#[repr(u8)]
+pub enum AutoPause {
+    #[default]
+    On = 0,
+    Off = 1,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct Settings {
+    #[serde(rename = "language_i18n")]
+    pub language: Language,
+    pub unit: DistanceUnit,
+    pub temperature_unit: TemperatureUnit,
+    /// This setting is not used by the device, set to 0
+    pub time_formatter: u8,
+    pub backlight: Backlight,
+    pub auto_pause: AutoPause,
+    /// This setting is not used by the device, set to 0
+    pub overwrite: u8,
+    pub keytone: bool,
 }

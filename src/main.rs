@@ -161,6 +161,9 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to set the time")?;
 
+        let settings = device.read_settings().await?;
+        info!("Settings: {:#?}", settings);
+
         let user_profile = device.read_user_profile().await?;
         info!("User profile: {:#?}", user_profile);
 
@@ -178,7 +181,7 @@ async fn main() -> Result<()> {
         info!("Workouts: {:#?}", workouts);
 
         device
-            .receive_file(
+            .read_file(
                 "20230508021939.fit", // "user_profile.json",
             )
             .await?;
@@ -189,7 +192,7 @@ async fn main() -> Result<()> {
         )
         .unwrap();
         device
-            .send_file("offline.gnss", &offline_gnss_data)
+            .write_file("offline.gnss", &offline_gnss_data)
             .await
             .context("Failed to send the offline GNSS data")?;
 

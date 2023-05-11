@@ -5,7 +5,7 @@ use std::fmt::{Debug, Display};
 use std::io::{Cursor, ErrorKind};
 use std::time::SystemTime;
 
-use crate::model::{HeaderJson, UserProfile, WithHeader, Workouts};
+use crate::model::{HeaderJson, Settings, UserProfile, WithHeader, WorkoutsItem};
 use crate::transport;
 use crate::transport::ctl_message::ControlMessageType;
 use anyhow::{Context, Result};
@@ -203,7 +203,7 @@ impl XossDevice {
     }
 
     #[instrument(skip(self), fields(size))]
-    pub async fn receive_file(&self, filename: &str) -> Result<Vec<u8>> {
+    pub async fn read_file(&self, filename: &str) -> Result<Vec<u8>> {
         // even though the underlying implementation of ymodem returns a stream, allowing us to stream the file, we don't do that here
         // it introduces problems with atomicity and will punch us in the face when we try to implement retries
         // the files are small enough that we can just read them into memory
@@ -266,7 +266,7 @@ impl XossDevice {
     }
 
     #[instrument(skip(self, content), fields(size = content.len()))]
-    pub async fn send_file(&self, filename: &str, content: &[u8]) -> Result<()> {
+    pub async fn write_file(&self, filename: &str, content: &[u8]) -> Result<()> {
         // we accept the file as a slice, for motivation see the comment in [receive_file]
         let device = self.transport.lock().await;
         let mut uart_stream = device.open_uart_stream().await;
@@ -335,7 +335,7 @@ impl XossDevice {
     #[instrument(skip(self))]
     pub async fn read_json_file<T: for<'de> Deserialize<'de>>(&self, filename: &str) -> Result<T> {
         {
-            let data = self.receive_file(filename).await?;
+            let data = self.read_file(filename).await?;
             let data =
                 std::str::from_utf8(&data).context("Failed to parse a json file as UTF-8")?;
 
@@ -373,7 +373,7 @@ impl XossDevice {
 
         trace!("Writing {}: {}", filename, data);
 
-        self.send_file(filename, data.as_bytes()).await?;
+        self.write_file(filename, data.as_bytes()).await?;
 
         Ok(())
     }
@@ -390,9 +390,38 @@ impl XossDevice {
             .context("Failed to write user profile")
     }
 
-    pub async fn read_workouts(&self) -> Result<Workouts> {
+    pub async fn read_workouts(&self) -> Result<Vec<WorkoutsItem>> {
+        #[derive(Deserialize)]
+        struct WorkoutsWrap {
+            pub workouts: Vec<WorkoutsItem>,
+        }
+
         self.read_json_file("workouts.json")
             .await
             .context("Failed to read workouts")
+            .map(|w: WorkoutsWrap| w.workouts)
+    }
+
+    pub async fn read_settings(&self) -> Result<Settings> {
+        #[derive(Deserialize)]
+        struct SettingsWrap {
+            pub settings: Settings,
+        }
+
+        self.read_json_file("settings.json")
+            .await
+            .context("Failed to read settings")
+            .map(|s: SettingsWrap| s.settings)
+    }
+
+    pub async fn write_settings(&self, settings: &Settings) -> Result<()> {
+        #[derive(Serialize)]
+        struct SettingsWrap<'a> {
+            pub settings: &'a Settings,
+        }
+
+        self.write_json_file("settings.json", &SettingsWrap { settings })
+            .await
+            .context("Failed to write settings")
     }
 }
