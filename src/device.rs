@@ -5,7 +5,7 @@ use std::fmt::{Debug, Display};
 use std::io::{Cursor, ErrorKind};
 use std::time::SystemTime;
 
-use crate::model::{UserProfile, Workouts};
+use crate::model::{HeaderJson, UserProfile, WithHeader, Workouts};
 use crate::transport;
 use crate::transport::ctl_message::ControlMessageType;
 use anyhow::{Context, Result};
@@ -14,15 +14,16 @@ use chrono::{NaiveDate, NaiveDateTime};
 use futures_util::{pin_mut, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 use tokio::time::Instant;
 use tokio_util::io::StreamReader;
-use tracing::{info, instrument, trace, Span};
+use tracing::{info, instrument, trace, warn, Span};
 
 pub struct XossDevice {
     // TODO: should we allow reconnecting? This might be a good place to do it
     // This would also necessitate BLE disconnect detection
     transport: Mutex<XossTransport>,
+    json_header: OnceCell<HeaderJson>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +82,7 @@ impl XossDevice {
 
         Ok(Self {
             transport: Mutex::new(transport),
+            json_header: OnceCell::new(),
         })
     }
 
@@ -126,6 +128,10 @@ impl XossDevice {
             })
     }
 
+    /// Delete a file from the device
+    ///
+    /// Don't try to remove the JSON files, the device will not recreate some of them
+    #[allow(unused)]
     pub async fn delete_file(&self, filename: &str) -> Result<()> {
         let transport = self.transport.lock().await;
         let mut buffer = [0; CTL_BUFFER_SIZE];
@@ -313,6 +319,19 @@ impl XossDevice {
         Ok(())
     }
 
+    pub async fn get_device_json_header(&self) -> Result<HeaderJson> {
+        Ok(match self.json_header.get() {
+            Some(h) => h.clone(),
+            None => {
+                self.read_user_profile().await?;
+                self.json_header
+                    .get()
+                    .expect("We have read the user profile but it did not initialize the header??")
+                    .clone()
+            }
+        })
+    }
+
     #[instrument(skip(self))]
     pub async fn read_json_file<T: for<'de> Deserialize<'de>>(&self, filename: &str) -> Result<T> {
         {
@@ -322,16 +341,35 @@ impl XossDevice {
 
             trace!("Retrieved {}: {}", filename, data);
 
-            let profile = serde_json::from_str(data).context("Failed to parse the json file")?;
+            let WithHeader { header, data } =
+                serde_json::from_str(data).context("Failed to parse the json file")?;
 
-            Ok::<_, anyhow::Error>(profile)
+            if header.version != "2.0.0" {
+                warn!(
+                    "The json file {} has an unknown version {}",
+                    filename, header.version
+                )
+            }
+
+            self.json_header.get_or_init(|| async move { header }).await;
+
+            Ok::<_, anyhow::Error>(data)
         }
         .with_context(|| format!("Failed to read {}", filename))
     }
 
     #[instrument(skip(self, data))]
     pub async fn write_json_file<T: Serialize>(&self, filename: &str, data: &T) -> Result<()> {
-        let data = serde_json::to_string(data).context("Failed to serialize the json file")?;
+        let header_json = self.get_device_json_header().await?;
+
+        let data = WithHeader {
+            // we should provide the header, as the device doesn't always re-generate it
+            // and it may confuse other software trying to read the JSON files
+            header: header_json,
+            data,
+        };
+
+        let data = serde_json::to_string(&data).context("Failed to serialize the json file")?;
 
         trace!("Writing {}: {}", filename, data);
 

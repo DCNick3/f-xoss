@@ -161,13 +161,10 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to set the time")?;
 
-        // device.delete_file("user_profile.json").await.context("Failed to delete the user profile")?;
-
         let user_profile = device.read_user_profile().await?;
         info!("User profile: {:#?}", user_profile);
 
         let user_profile = UserProfile {
-            device_info: None,
             user: Some(User {
                 platform: "XOSS".to_string(),
                 uid: 42,
@@ -200,7 +197,7 @@ async fn main() -> Result<()> {
     }
     .await;
 
-    tokio::time::sleep(Duration::from_secs(10))
+    tokio::time::sleep(Duration::from_secs(1))
         .instrument(info_span!("final_sleep"))
         .await;
 

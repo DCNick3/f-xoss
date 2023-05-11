@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HeaderJson {
     pub device_model: String,
     pub sn: String,
@@ -11,7 +11,15 @@ pub struct HeaderJson {
     pub version: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WithHeader<T> {
+    #[serde(flatten)]
+    pub header: HeaderJson,
+    #[serde(flatten)]
+    pub data: T,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct UserProfileInner {
     #[serde(rename = "ALAHR")]
     pub alahr: i64,
@@ -30,22 +38,20 @@ pub struct UserProfileInner {
     pub weight: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct User {
     pub platform: String,
     pub uid: u32,
     pub user_name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserProfile {
-    #[serde(flatten)]
-    pub device_info: Option<HeaderJson>,
     pub user: Option<User>,
     pub user_profile: UserProfileInner,
 }
 
-#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum WorkoutState {
     NotSyncronized,
@@ -55,16 +61,14 @@ pub enum WorkoutState {
     Broken,
 }
 
-#[derive(Serialize_tuple, Deserialize_tuple, Debug)]
+#[derive(Serialize_tuple, Deserialize_tuple, Debug, Clone)]
 pub struct WorkoutsItem {
     pub name: u64,
     pub size: u32,
     pub state: WorkoutState,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Workouts {
-    #[serde(flatten)]
-    pub device_info: Option<HeaderJson>,
     pub workouts: Vec<WorkoutsItem>,
 }
