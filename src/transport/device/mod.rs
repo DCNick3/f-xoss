@@ -7,11 +7,12 @@ use uart::UartChannel;
 pub use uart::UartStream;
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use btleplug::api::Peripheral as _;
+use btleplug::api::{Characteristic, Peripheral as _};
 use btleplug::platform::Peripheral;
 use ctl::CtlChannel;
 use futures_util::future::{AbortHandle, Abortable};
@@ -24,8 +25,24 @@ const TX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400002_b5a3_f393_e0a9_e
 const RX_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400003_b5a3_f393_e0a9_e50e24dcca9e);
 const CTL_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x6e400004_b5a3_f393_e0a9_e50e24dcca9e);
 
+const FIRMWARE_REVISION_CHARACTERISTIC_UUID: Uuid =
+    Uuid::from_u128(0x00002a26_0000_1000_8000_00805f9b34fb);
+const MANUFACTURER_NAME_CHARACTERISTIC_UUID: Uuid =
+    Uuid::from_u128(0x00002a29_0000_1000_8000_00805f9b34fb);
+const MODEL_NUMBER_CHARACTERISTIC_UUID: Uuid =
+    Uuid::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
+const HARDWARE_REVISION_CHARACTERISTIC_UUID: Uuid =
+    Uuid::from_u128(0x00002a27_0000_1000_8000_00805f9b34fb);
+const SERIAL_NUMBER_CHARACTERISTIC_UUID: Uuid =
+    Uuid::from_u128(0x00002a25_0000_1000_8000_00805f9b34fb);
+
+const BATTERY_LEVEL_CHARACTERISTIC_UUID: Uuid =
+    Uuid::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
+
 struct Shared {
     device: Peripheral,
+    device_information: DeviceInformation,
+    battery_level: Arc<AtomicU32>,
     #[allow(unused)] // yeah lol, it's used to keep the event pump task alive
     abort_handle: AbortHandle,
 }
@@ -38,6 +55,15 @@ struct Inner {
 pub struct XossTransport {
     shared: Arc<Shared>,
     inner: Mutex<Inner>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceInformation {
+    pub firmware_revision: String,
+    pub manufacturer_name: String,
+    pub model_number: String,
+    pub hardware_revision: String,
+    pub serial_number: String,
 }
 
 const NORMAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -57,10 +83,42 @@ impl XossTransport {
         let mut rx_characteristic = None;
         let mut ctl_characteristic = None;
 
+        let mut firmware_revision_characteristic = None;
+        let mut manufacturer_name_characteristic = None;
+        let mut model_number_characteristic = None;
+        let mut hardware_revision_characteristic = None;
+        let mut serial_number_characteristic = None;
+
+        let mut battery_level_characteristic = None;
+
         let mut required_characteristics = BTreeMap::from([
             (TX_CHARACTERISTIC_UUID, &mut tx_characteristic),
             (RX_CHARACTERISTIC_UUID, &mut rx_characteristic),
             (CTL_CHARACTERISTIC_UUID, &mut ctl_characteristic),
+            (
+                FIRMWARE_REVISION_CHARACTERISTIC_UUID,
+                &mut firmware_revision_characteristic,
+            ),
+            (
+                MANUFACTURER_NAME_CHARACTERISTIC_UUID,
+                &mut manufacturer_name_characteristic,
+            ),
+            (
+                MODEL_NUMBER_CHARACTERISTIC_UUID,
+                &mut model_number_characteristic,
+            ),
+            (
+                HARDWARE_REVISION_CHARACTERISTIC_UUID,
+                &mut hardware_revision_characteristic,
+            ),
+            (
+                SERIAL_NUMBER_CHARACTERISTIC_UUID,
+                &mut serial_number_characteristic,
+            ),
+            (
+                BATTERY_LEVEL_CHARACTERISTIC_UUID,
+                &mut battery_level_characteristic,
+            ),
         ]);
 
         for characteristic in device.characteristics() {
@@ -84,6 +142,8 @@ impl XossTransport {
 
         let (ctl_send, ctl_recv) = tokio::sync::mpsc::channel(3);
         let (rx_send, rx_recv) = tokio::sync::mpsc::channel(3);
+        let battery_level = Arc::new(AtomicU32::new(0));
+        let battery_level_copy = battery_level.clone();
 
         let mut events = device
             .notifications()
@@ -105,6 +165,12 @@ impl XossTransport {
                         trace!("CTL: {}", hex::encode(&data));
                         // this can error out only if the recv side is closed. We have a different way to stop the loop (abort_token), so just ignore the error
                         let _ = ctl_send.send(data).await;
+                    } else if characteristic == BATTERY_LEVEL_CHARACTERISTIC_UUID {
+                        let data = notification.value;
+                        assert_eq!(data.len(), 1);
+                        let new_battery_level = data[0] as u32;
+                        trace!("Battery level: {}", new_battery_level);
+                        battery_level_copy.store(new_battery_level, Ordering::Relaxed);
                     } else {
                         warn!("Unknown notification: {:?}", notification);
                     };
@@ -119,6 +185,14 @@ impl XossTransport {
         let tx_characteristic = tx_characteristic.unwrap();
         let rx_characteristic = rx_characteristic.unwrap();
 
+        let firmware_revision_characteristic = firmware_revision_characteristic.unwrap();
+        let manufacturer_name_characteristic = manufacturer_name_characteristic.unwrap();
+        let model_number_characteristic = model_number_characteristic.unwrap();
+        let hardware_revision_characteristic = hardware_revision_characteristic.unwrap();
+        let serial_number_characteristic = serial_number_characteristic.unwrap();
+
+        let battery_level_characteristic = battery_level_characteristic.unwrap();
+
         // make sure we are subscribed to the characteristics
         device
             .subscribe(&rx_characteristic)
@@ -128,9 +202,66 @@ impl XossTransport {
             .subscribe(&ctl_characteristic)
             .await
             .context("Failed to subscribe to the CTL characteristic")?;
+        device
+            .subscribe(&battery_level_characteristic)
+            .await
+            .context("Failed to subscribe to the battery level characteristic")?;
+
+        async fn read_chara_string(
+            device: &Peripheral,
+            chara: &Characteristic,
+            name: &str,
+        ) -> Result<String> {
+            device
+                .read(&chara)
+                .await
+                .with_context(|| format!("Failed to read {} characteristic", name))
+                .and_then(|s| {
+                    String::from_utf8(s).with_context(|| format!("{} is not valid UTF-8", name))
+                })
+        }
+
+        let device_information = DeviceInformation {
+            firmware_revision: read_chara_string(
+                &device,
+                &firmware_revision_characteristic,
+                "firmware revision",
+            )
+            .await?,
+            manufacturer_name: read_chara_string(
+                &device,
+                &manufacturer_name_characteristic,
+                "manufacturer name",
+            )
+            .await?,
+            model_number: read_chara_string(&device, &model_number_characteristic, "model number")
+                .await?,
+            hardware_revision: read_chara_string(
+                &device,
+                &hardware_revision_characteristic,
+                "hardware revision",
+            )
+            .await?,
+            serial_number: read_chara_string(
+                &device,
+                &serial_number_characteristic,
+                "serial number",
+            )
+            .await?,
+        };
+
+        battery_level.store(
+            device
+                .read(&battery_level_characteristic)
+                .await
+                .context("Failed to read battery level")?[0] as u32,
+            Ordering::Relaxed,
+        );
 
         let shared = Arc::new(Shared {
             device,
+            device_information,
+            battery_level,
             abort_handle,
         });
 
@@ -150,6 +281,15 @@ impl XossTransport {
         };
 
         Ok(result)
+    }
+
+    pub fn device_info(&self) -> &DeviceInformation {
+        // TODO: maybe make it lazy-retrieve?
+        &self.shared.device_information
+    }
+
+    pub fn battery_level(&self) -> u32 {
+        self.shared.battery_level.load(Ordering::Relaxed)
     }
 
     #[instrument(skip(self, buffer), ret, level = Level::DEBUG)]

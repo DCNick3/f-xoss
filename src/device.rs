@@ -33,6 +33,16 @@ impl XossDevice {
         transport.disconnect().await
     }
 
+    pub async fn device_info(&self) -> transport::DeviceInformation {
+        let transport = self.transport.lock().await;
+        transport.device_info().clone()
+    }
+
+    pub async fn battery_level(&self) -> u32 {
+        let transport = self.transport.lock().await;
+        transport.battery_level()
+    }
+
     #[instrument(skip(self))]
     pub async fn receive_file(&self, filename: &str) -> Result<Vec<u8>> {
         // even though the underlying implementation of ymodem returns a stream, allowing us to stream the file, we don't do that here

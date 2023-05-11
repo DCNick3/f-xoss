@@ -4,4 +4,4 @@ pub mod ctl_message;
 mod device;
 pub mod ymodem;
 
-pub use device::{CtlBuffer, UartStream, XossTransport, CTL_BUFFER_SIZE};
+pub use device::{CtlBuffer, DeviceInformation, UartStream, XossTransport, CTL_BUFFER_SIZE};

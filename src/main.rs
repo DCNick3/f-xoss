@@ -145,6 +145,9 @@ async fn main() -> Result<()> {
         .context("Failed to initialize the device")?;
 
     let res = async {
+        info!("Device information: {:#?}", device.device_info().await);
+        info!("Battery level: {:?}", device.battery_level().await);
+
         device
             .receive_file(
                 "20230508021939.fit", // "user_profile.json",
