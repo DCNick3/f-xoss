@@ -1,3 +1,7 @@
+//! This module provides low-level functions to communicate with device. They may leave the device in an inconsistent state if used incorrectly.
+
 pub mod ctl_message;
-pub mod device;
+mod device;
 pub mod ymodem;
+
+pub use device::{CtlBuffer, UartStream, XossTransport, CTL_BUFFER_SIZE};

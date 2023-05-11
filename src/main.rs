@@ -1,3 +1,4 @@
+mod device;
 mod transport;
 
 use std::io::{Cursor, ErrorKind};
@@ -15,7 +16,7 @@ use tokio_stream::{Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
 use crate::transport::ctl_message::{ControlMessageType, RawControlMessage};
-use crate::transport::device::{CtlBuffer, XossTransport};
+use crate::transport::{CtlBuffer, XossTransport};
 use tracing::{info, info_span, instrument, warn};
 use tracing_futures::Instrument;
 use tracing_indicatif::IndicatifLayer;
@@ -100,7 +101,7 @@ async fn find_device(adapter: &Adapter, mac: BDAddr) -> Result<Option<Peripheral
 
     adapter.stop_scan().await.context("Failed to stop scan")?;
 
-    Ok(result?)
+    result
 }
 
 #[instrument(skip(device))]
@@ -119,8 +120,9 @@ async fn receive_file(device: &XossTransport, filename: &str) -> Result<Vec<u8>>
             },
         )
         .await
-        .context("Failed to send a control message")?;
-    assert_eq!(reply.msg_type, ControlMessageType::Returning);
+        .context("Failed to send a control message")?
+        .expect_ok(ControlMessageType::Returning)?;
+    assert_eq!(reply, filename.as_bytes());
 
     let (file_info, out_stream) = transport::ymodem::receive_file(&mut uart_stream).await?;
     let reader =
@@ -140,11 +142,11 @@ async fn receive_file(device: &XossTransport, filename: &str) -> Result<Vec<u8>>
         .context("Failed to read the file")?;
     drop(reader);
 
-    let reply = device
+    device
         .recv_ctl(&mut buffer)
         .await
-        .context("Receiving the post-download status message")?;
-    assert_eq!(reply.msg_type, ControlMessageType::Idle);
+        .context("Receiving the post-download status message")?
+        .expect_ok(ControlMessageType::Idle)?;
 
     let time = start.elapsed();
 
@@ -177,8 +179,9 @@ async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Re
             },
         )
         .await
-        .context("Failed to send a control message")?;
-    assert_eq!(reply.msg_type, ControlMessageType::Accept);
+        .context("Failed to send a control message")?
+        .expect_ok(ControlMessageType::Accept)?;
+    assert_eq!(reply, filename.as_bytes());
 
     transport::ymodem::send_file(&mut uart_stream, filename, &mut Cursor::new(content)).await?;
 
@@ -186,11 +189,11 @@ async fn send_file(device: &XossTransport, filename: &str, content: &[u8]) -> Re
 
     let start = Instant::now();
 
-    let reply = device
+    device
         .recv_ctl(&mut buffer)
         .await
-        .context("Receiving the post-download status message")?;
-    assert_eq!(reply.msg_type, ControlMessageType::Idle);
+        .context("Receiving the post-download status message")?
+        .expect_ok(ControlMessageType::Idle)?;
 
     let device_proc_time = start.elapsed();
 

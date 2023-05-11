@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use num_enum::TryFromPrimitive;
+use thiserror::Error;
 
 #[derive(TryFromPrimitive, Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
@@ -117,13 +118,55 @@ impl<'a> RawControlMessage<'a> {
 
         Ok(&buf[..len + 2])
     }
+
+    pub fn into_result(self) -> Result<RawControlMessage<'a>, ControlError> {
+        use ControlMessageType::*;
+        match self.msg_type {
+            ErrVali => Err(ControlError::Validation),
+            ErrNoFile => Err(ControlError::NoFile(
+                std::str::from_utf8(self.body)
+                    .expect("Invalid UTF-8 in ErrNoFile")
+                    .to_string(),
+            )),
+            ErrMemory => Err(ControlError::NoMemory),
+            ErrStatus => match self.body {
+                b"\0" => Err(ControlError::InvalidTransactionStatus),
+                body => Err(ControlError::InvalidFileStatus(
+                    std::str::from_utf8(body)
+                        .expect("Invalid UTF-8 in ErrStatus")
+                        .to_string(),
+                )),
+            },
+            ErrDecode => Err(ControlError::DecodeFailed(
+                std::str::from_utf8(self.body)
+                    .expect("Invalid UTF-8 in ErrDecode")
+                    .to_string(),
+            )),
+            _ => Ok(self),
+        }
+    }
+
+    pub fn expect_ok(mut self, ty: ControlMessageType) -> Result<&'a [u8]> {
+        self = self.into_result().context("Error response")?;
+        if self.msg_type != ty {
+            bail!("Expected {:?}, got {:?}", ty, self.msg_type);
+        }
+        Ok(self.body)
+    }
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ControlError {
+    #[error("Command validation error")]
     Validation,
-    NoFile,
+    #[error("No such file: {0}")]
+    NoFile(String),
+    #[error("Device out of memory")]
     NoMemory,
-    InvalidStatus,
-    DecodeFailed,
+    #[error("Invalid transaction status")]
+    InvalidTransactionStatus,
+    #[error("Invalid file status: {0:?}")]
+    InvalidFileStatus(String),
+    #[error("JSON decode failed: {0}")]
+    DecodeFailed(String),
 }
