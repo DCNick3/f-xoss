@@ -40,8 +40,18 @@ impl XossDeviceInfo {
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
+pub struct MgaConfig {
+    pub base_url: Option<String>,
+    pub period_weeks: Option<u32>,
+    pub resolution_days: Option<u32>,
+    pub ublox_token: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct XossUtilConfig {
     pub devices: Vec<XossDeviceInfo>,
+    #[serde(default)]
+    pub mga: MgaConfig,
 }
 
 pub static APP_DIRS: Lazy<ProjectDirs> = Lazy::new(|| {

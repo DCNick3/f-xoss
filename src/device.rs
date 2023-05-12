@@ -45,16 +45,16 @@ impl Display for MemoryCapacity {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum AssistedGnssState {
+pub enum MgaState {
     MissingData,
     ValidUntil(NaiveDate),
 }
 
-impl Display for AssistedGnssState {
+impl Display for MgaState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AssistedGnssState::MissingData => write!(f, "A-GNSS data missing"),
-            AssistedGnssState::ValidUntil(date) => write!(f, "Valid until {}", date),
+            MgaState::MissingData => write!(f, "A-GNSS data missing"),
+            MgaState::ValidUntil(date) => write!(f, "Valid until {}", date),
         }
     }
 }
@@ -175,7 +175,8 @@ impl XossDevice {
             })
     }
 
-    pub async fn get_assisted_gnss_status(&self) -> Result<AssistedGnssState> {
+    /// Get the current Multi-GNSS Assistance (MGA) status
+    pub async fn get_mga_status(&self) -> Result<MgaState> {
         let transport = self.transport.lock().await;
         let mut buffer = [0; CTL_BUFFER_SIZE];
         transport
@@ -190,10 +191,10 @@ impl XossDevice {
                 assert_eq!(b[1], 0x00);
                 let time = u32::from_le_bytes([b[2], b[3], b[4], b[5]]);
                 if time == 0 {
-                    AssistedGnssState::MissingData
+                    MgaState::MissingData
                 } else {
                     // convert unix time to NaiveDate
-                    AssistedGnssState::ValidUntil(
+                    MgaState::ValidUntil(
                         NaiveDateTime::from_timestamp_opt(time as i64, 0)
                             .unwrap()
                             .date(),

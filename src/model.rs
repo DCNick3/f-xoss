@@ -35,7 +35,7 @@ pub struct UserProfileInner {
     pub gender: i64,
     pub height: i64,
     /// Time zone offset in seconds
-    pub time_zone: i64,
+    pub time_zone: i32,
     pub weight: i64,
 }
 
