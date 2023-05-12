@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
             tracing_subscriber::registry()
                 .with(
                     tracing_subscriber::fmt::layer()
-                        .with_writer(indicatif_layer.get_stdout_writer()),
+                        .with_writer(indicatif_layer.get_stderr_writer()),
                 )
                 .with(indicatif_layer),
         )

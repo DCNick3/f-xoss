@@ -3,9 +3,12 @@ mod device;
 use crate::config::XossUtilConfig;
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser, Debug)]
+#[command(name = "f-xoss-util", author, version, about, long_about = None)]
+/// An utility to interact with the Xoss NAV bike computer
 pub struct Cli {
     #[clap(subcommand)]
     pub command: CliCommand,
@@ -60,12 +63,21 @@ pub struct DeviceCli {
     subcommand: DeviceCommand,
 }
 
+#[derive(clap::Args, Debug)]
+pub struct GenerateCommand {
+    /// The shell to generate the completion for
+    #[clap(value_enum)]
+    shell: Shell,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum CliCommand {
     /// Interact with the device.
     Dev(DeviceCli),
     /// Make sure the MGA data is up to date.
     UpdateMga(MgaUpdateOptions),
+    /// Generate shell completion
+    Completion(GenerateCommand),
 }
 
 impl Cli {
@@ -89,6 +101,12 @@ impl Cli {
             CliCommand::UpdateMga(mga_update) => {
                 let config = config.context("Config is required for update-mga subcommand")?;
                 crate::mga::get_mga_data(&config.mga, &mga_update).await?;
+                Ok(())
+            }
+            CliCommand::Completion(generate) => {
+                let mut cmd = Cli::command();
+                let bin_name = cmd.get_name().to_string();
+                clap_complete::generate(generate.shell, &mut cmd, bin_name, &mut std::io::stdout());
                 Ok(())
             }
         }
