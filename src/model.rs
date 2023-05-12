@@ -71,6 +71,12 @@ pub struct WorkoutsItem {
     pub state: WorkoutState,
 }
 
+impl WorkoutsItem {
+    pub fn filename(&self) -> String {
+        format!("{}.fit", self.name)
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub enum Language {
     #[serde(rename = "en")]

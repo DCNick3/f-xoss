@@ -62,6 +62,7 @@ pub struct DeviceCli {
 
 #[derive(Subcommand, Debug)]
 pub enum CliCommand {
+    /// Interact with the device.
     Dev(DeviceCli),
     /// Make sure the MGA data is up to date.
     UpdateMga(MgaUpdateOptions),
@@ -77,14 +78,13 @@ impl Cli {
 
                 let result = dev.run(&device, config).await;
 
-                let disconnect_result = device
-                    .disconnect()
-                    .await
-                    .context("Failed to disconnect from the device");
+                // let disconnect_result = device
+                //     .disconnect()
+                //     .await
+                //     .context("Failed to disconnect from the device");
 
-                result
-                    .context("Failed to run the device subcommand")
-                    .and(disconnect_result)
+                result.context("Failed to run the device subcommand")
+                // .and(disconnect_result)
             }
             CliCommand::UpdateMga(mga_update) => {
                 let config = config.context("Config is required for update-mga subcommand")?;

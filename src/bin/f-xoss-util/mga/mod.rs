@@ -22,8 +22,8 @@ fn mga_build_url(config: &MgaConfig) -> Result<Url> {
     let url = config
         .base_url
         .as_deref()
-        .unwrap_or("https://online-live1.services.u-blox.com");
-    let mut url = Url::parse(url)?;
+        .unwrap_or("https://offline-live1.services.u-blox.com");
+    let mut url = Url::parse(url)?.join("GetOfflineData.ashx").unwrap();
 
     let period_str = config.period_weeks.unwrap_or(4).to_string();
     let resolution_str = config.resolution_days.unwrap_or(2).to_string();
@@ -46,7 +46,7 @@ fn mga_build_url(config: &MgaConfig) -> Result<Url> {
         .iter()
         .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<_>>()
-        .join("l");
+        .join(";");
     url.set_query(Some(query_string.as_str()));
 
     let url_str = url.to_string();
@@ -87,7 +87,7 @@ async fn get_current_mga_data() -> Result<Option<MgaData>> {
     .with_context(|| format!("Reading cached MGA data from {}", path.display()))
 }
 
-pub async fn get_mga_data(config: &MgaConfig, options: &MgaUpdateOptions) -> Result<Vec<u8>> {
+pub async fn get_mga_data(config: &MgaConfig, options: &MgaUpdateOptions) -> Result<MgaData> {
     let cached_data = get_current_mga_data().await?;
     let today = chrono::Utc::now().date_naive();
     // update if we are > 2 days out of date
@@ -100,10 +100,12 @@ pub async fn get_mga_data(config: &MgaConfig, options: &MgaUpdateOptions) -> Res
         duration > chrono::Duration::days(2)
     };
 
+    tokio::fs::create_dir_all(mga_file_path().parent().unwrap()).await?;
+
     match cached_data {
         Some(data) if options.mga_offline || !out_of_date(&data) && !options.mga_force_update => {
             debug!("Using cached MGA data");
-            Ok(data.data)
+            Ok(data)
         }
         None if options.mga_offline => Err(anyhow!(
             "There is no cached MGA data yet, but mga-offline flag is set"
@@ -114,7 +116,7 @@ pub async fn get_mga_data(config: &MgaConfig, options: &MgaUpdateOptions) -> Res
             tokio::fs::write(mga_file_path(), &data.data)
                 .await
                 .context("Writing MGA data to cache")?;
-            Ok(data.data)
+            Ok(data)
         }
     }
 }

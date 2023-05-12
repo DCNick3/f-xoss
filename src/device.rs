@@ -17,7 +17,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, OnceCell};
 use tokio::time::Instant;
 use tokio_util::io::StreamReader;
-use tracing::{info, instrument, trace, warn, Span};
+use tracing::{debug, info, instrument, trace, warn, Level, Span};
 
 pub struct XossDevice {
     // TODO: should we allow reconnecting? This might be a good place to do it
@@ -176,7 +176,7 @@ impl XossDevice {
     }
 
     /// Get the current Multi-GNSS Assistance (MGA) status
-    pub async fn get_mga_status(&self) -> Result<MgaState> {
+    pub async fn get_mga_state(&self) -> Result<MgaState> {
         let transport = self.transport.lock().await;
         let mut buffer = [0; CTL_BUFFER_SIZE];
         transport
@@ -232,7 +232,7 @@ impl XossDevice {
 
         Span::current().record("size", file_info.size);
 
-        info!(
+        debug!(
             "Downloading {} ({})",
             filename,
             humansize::format_size(file_info.size, humansize::BINARY.decimal_zeroes(2))
@@ -255,7 +255,7 @@ impl XossDevice {
 
         let speed = (buf.len() as f64) / (time.as_secs_f64()) / 1024.0;
 
-        info!(
+        debug!(
             "Downloaded {} ({}) in {:.2} seconds ({:.2} KiB/s)",
             filename,
             humansize::format_size(buf.len(), humansize::BINARY.decimal_zeroes(2)),
@@ -286,7 +286,7 @@ impl XossDevice {
             .expect_ok(ControlMessageType::Accept)?;
         assert_eq!(reply, filename.as_bytes());
 
-        info!(
+        debug!(
             "Uploading {} ({})",
             filename,
             humansize::format_size(content.len(), humansize::BINARY.decimal_zeroes(2))
@@ -308,7 +308,7 @@ impl XossDevice {
 
         let speed = (content.len() as f64) / (time.as_secs_f64()) / 1024.0;
 
-        info!(
+        debug!(
             "Uploaded {} ({}) in {:.2} seconds ({:.2} KiB/s). Device processed it in {:.2} seconds",
             filename,
             humansize::format_size(content.len(), humansize::BINARY.decimal_zeroes(2)),
@@ -333,7 +333,7 @@ impl XossDevice {
         })
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self), level = Level::DEBUG)]
     pub async fn read_json_file<T: for<'de> Deserialize<'de>>(&self, filename: &str) -> Result<T> {
         {
             let data = self.read_file(filename).await?;
@@ -359,7 +359,7 @@ impl XossDevice {
         .with_context(|| format!("Failed to read {}", filename))
     }
 
-    #[instrument(skip(self, data))]
+    #[instrument(skip(self, data), level = Level::DEBUG)]
     pub async fn write_json_file<T: Serialize>(&self, filename: &str, data: &T) -> Result<()> {
         let header_json = self.get_device_json_header().await?;
 
