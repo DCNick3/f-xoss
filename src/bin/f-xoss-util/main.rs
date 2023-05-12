@@ -1,12 +1,10 @@
+mod config;
 mod locate_util;
 
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
-use btleplug::api::{BDAddr, Peripheral as _};
-use btleplug::platform::Manager;
 
-use f_xoss::device::XossDevice;
 use f_xoss::model::{User, UserProfile};
 use tracing::{info, info_span};
 use tracing_futures::Instrument;
@@ -37,32 +35,22 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let manager = Manager::new().await.context("Failed to create a manager")?;
-    let adapter = locate_util::find_adapter(&manager)
-        .await
-        .context("Failed to find adapter")?;
+    let config = config::load_config().context("Failed to load the config")?;
 
-    let mac = BDAddr::from([0xD9, 0x29, 0xE4, 0x59, 0x55, 0x5C]);
-    let device = locate_util::find_ble_device(&adapter, mac)
-        .await
-        .context("Failed to find device")?
-        .context("Device not found")?;
+    match config {
+        None => info!(
+            "No config file found at {}",
+            config::config_path().display()
+        ),
+        Some(_) => info!(
+            "Valid config file found at {}",
+            config::config_path().display()
+        ),
+    }
 
-    info!(
-        "Device found: {:?}",
-        device.properties().await?.unwrap().local_name
-    );
-
-    device
-        .connect()
-        .instrument(info_span!("connect"))
+    let device = locate_util::find_device_from_config(&config)
         .await
-        .context("Failed to connect to the device")?;
-    info!("Connected to the device");
-
-    let device = XossDevice::new(device)
-        .await
-        .context("Failed to initialize the device")?;
+        .context("Failed to find the device")?;
 
     let res = async {
         info!("Device information: {:#?}", device.device_info().await);

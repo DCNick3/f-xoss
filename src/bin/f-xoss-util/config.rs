@@ -1,0 +1,70 @@
+use anyhow::{Context, Result};
+use btleplug::api::BDAddr;
+use directories::ProjectDirs;
+use once_cell::sync::Lazy;
+use serde::de;
+use serde::Deserialize;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+
+fn deserialize_bdaddr<'de, D>(deserializer: D) -> Result<BDAddr, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::str::FromStr;
+    let s = String::deserialize(deserializer)?;
+    let addr = BDAddr::from_str(&s).map_err(|e| {
+        de::Error::custom(format!(
+            "Failed to parse BDAddr from string: {:?}: {}",
+            s, e
+        ))
+    })?;
+
+    Ok(addr)
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct XossDeviceInfo {
+    pub name: Option<String>,
+    #[serde(deserialize_with = "deserialize_bdaddr")]
+    pub address: BDAddr,
+}
+
+impl XossDeviceInfo {
+    pub fn identify(&self) -> String {
+        self.name
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| self.address.to_string())
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct XossUtilConfig {
+    pub devices: Vec<XossDeviceInfo>,
+}
+
+pub static APP_DIRS: Lazy<ProjectDirs> = Lazy::new(|| {
+    ProjectDirs::from("com.dcnick3", "", "f-xoss").expect("Failed to get the project directories")
+});
+
+pub fn config_path() -> PathBuf {
+    APP_DIRS.config_dir().join("config.toml")
+}
+
+pub fn load_config() -> Result<Option<XossUtilConfig>> {
+    let config_path = config_path();
+
+    let config = match std::fs::read_to_string(&config_path) {
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        r => r.map(Some),
+    }
+    .context(format!("Reading config file {}", config_path.display()))?;
+
+    config
+        .map(|config| {
+            toml::from_str(&config)
+                .with_context(|| format!("Parsing config file {}", config_path.display()))
+        })
+        .transpose()
+}
