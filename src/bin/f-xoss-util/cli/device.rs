@@ -106,7 +106,7 @@ async fn sync(
 
     let user_profile = device.read_user_profile().await?;
 
-    let time_zone = Local::now().offset().utc_minus_local();
+    let time_zone = Local::now().offset().local_minus_utc();
 
     let user_profile = UserProfile {
         user: Some(user_profile.user.unwrap_or_else(|| User {
