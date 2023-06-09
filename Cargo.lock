@@ -1047,6 +1047,38 @@ checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 name = "f-xoss"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "binrw",
+ "btleplug",
+ "bytes",
+ "chrono",
+ "crc16",
+ "futures-util",
+ "hex",
+ "humansize",
+ "indicatif",
+ "num_enum",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_tuple",
+ "surf",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "tracing-futures",
+ "tracing-indicatif",
+ "uuid",
+]
+
+[[package]]
+name = "f-xoss-util"
+version = "0.1.0"
+dependencies = [
  "ansi_term",
  "anyhow",
  "async-stream",
@@ -1063,6 +1095,7 @@ dependencies = [
  "dbus",
  "dialoguer",
  "directories",
+ "f-xoss",
  "futures-util",
  "hex",
  "humansize",

@@ -1,7 +1,11 @@
-use anyhow::Result;
-use binrw::{BinRead, BinReaderExt};
+use binrw::{BinRead, BinReaderExt, BinResult};
+use chrono::NaiveDate;
 
-use super::MgaData;
+pub struct MgaData {
+    pub data: Vec<u8>,
+    pub valid_since: NaiveDate,
+    pub valid_until: NaiveDate,
+}
 
 #[derive(BinRead)]
 #[br(magic = b"\xb5\x62\x13\x20\x4c\x00\x00\x00")]
@@ -20,15 +24,15 @@ struct UbxMgaAno {
 }
 
 impl UbxMgaAno {
-    pub fn date(&self) -> chrono::NaiveDate {
+    pub fn date(&self) -> NaiveDate {
         let year = 2000 + self.year as i32;
         let month = self.month as u32;
         let day = self.day as u32;
-        chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap()
+        NaiveDate::from_ymd_opt(year, month, day).unwrap()
     }
 }
 
-pub fn parse_mga_data(data: Vec<u8>) -> Result<MgaData> {
+pub fn parse_mga_data(data: Vec<u8>) -> BinResult<MgaData> {
     let mut cursor = std::io::Cursor::new(&data);
     let mut items = Vec::new();
     while cursor.position() < cursor.get_ref().len() as u64 {

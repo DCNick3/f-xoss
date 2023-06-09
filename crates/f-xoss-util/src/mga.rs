@@ -1,9 +1,7 @@
-mod parse;
-
 use crate::cli::MgaUpdateOptions;
 use crate::config::MgaConfig;
 use anyhow::{anyhow, Context, Result};
-use chrono::NaiveDate;
+use f_xoss::mga::{parse_mga_data, MgaData};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use surf::{StatusCode, Url};
@@ -12,12 +10,6 @@ use tracing::{debug, instrument, warn};
 
 fn mga_file_path() -> PathBuf {
     crate::config::APP_DIRS.cache_dir().join("mgaoffline.ubx")
-}
-
-pub struct MgaData {
-    pub data: Vec<u8>,
-    pub valid_since: NaiveDate,
-    pub valid_until: NaiveDate,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -102,7 +94,7 @@ async fn download_mga_data(config: &MgaConfig) -> Result<MgaData, Error> {
         .map_err(|err| anyhow!(err))
         .context("Failed to read MGA data")?;
 
-    Ok(parse::parse_mga_data(raw_data).context("Parsing downloaded MGA data")?)
+    Ok(parse_mga_data(raw_data).context("Parsing downloaded MGA data")?)
 }
 
 async fn get_current_mga_data() -> Result<Option<MgaData>> {
@@ -111,7 +103,7 @@ async fn get_current_mga_data() -> Result<Option<MgaData>> {
     async {
         match tokio::fs::read(&path).await {
             Ok(data) => {
-                let data = parse::parse_mga_data(data).context("Parsing cached MGA data")?;
+                let data = parse_mga_data(data).context("Parsing cached MGA data")?;
                 Ok::<_, anyhow::Error>(Some(data))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
