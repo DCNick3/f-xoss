@@ -2,7 +2,9 @@
 name = "f-xoss"
 version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/DCNick3/f-xoss.git"
+license.workspace = true
+repository.workspace = true
+description = "Free your XOSS device: a library for communicating with XOSS bike computers"
 
 
 [dependencies]

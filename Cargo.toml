@@ -5,6 +5,10 @@ members = [
     "crates/f-xoss-util",
 ]
 
+[workspace.package]
+license = "MPL-2.0"
+repository = "https://github.com/DCNick3/f-xoss.git"
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
