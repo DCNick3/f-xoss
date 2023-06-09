@@ -14,6 +14,10 @@ repository = "https://github.com/DCNick3/f-xoss.git"
 inherits = "release"
 lto = "thin"
 
+[workspace.metadata.release]
+shared-version = true
+tag-prefix = ""
+
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
