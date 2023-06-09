@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 btleplug = "0.10.5"
 uuid = "1.3.2"
+itertools = "0.10.5"
 
 hex = "0.4.3"
 binrw = "0.11.1"
@@ -19,6 +20,10 @@ directories = "5.0.1"
 clap = { version = "4.2.7", features = ["derive"] }
 clap_complete = "4.2.3"
 prettytable-rs = "0.10.0"
+dialoguer = "0.10.4"
+console = "0.15.7"
+owo-colors = "3.5.0"
+similar = "2.2.1"
 
 crc16 = "0.4.0"
 once_cell = "1.17.1"

@@ -1,10 +1,15 @@
 mod device;
+mod setup;
 
+use crate::config;
 use crate::config::XossUtilConfig;
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use prettytable::table;
+use std::ops::Deref;
+use tracing::info;
 
 #[derive(Parser, Debug)]
 #[command(name = "f-xoss-util", author, version, about, long_about = None)]
@@ -13,6 +18,9 @@ pub struct Cli {
     #[clap(subcommand)]
     pub command: CliCommand,
 }
+
+#[derive(Args, Debug)]
+pub struct SetupCli {}
 
 #[derive(Args, Debug)]
 pub struct MgaUpdateOptions {
@@ -64,7 +72,7 @@ pub struct DeviceCli {
 }
 
 #[derive(clap::Args, Debug)]
-pub struct GenerateCommand {
+pub struct GenerateCli {
     /// The shell to generate the completion for
     #[clap(value_enum)]
     shell: Shell,
@@ -72,17 +80,39 @@ pub struct GenerateCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum CliCommand {
+    /// Generate a config file to be used with the other commands.
+    Setup(SetupCli),
+    /// Print paths to the config file and the data directory.
+    Paths,
     /// Interact with the device.
     Dev(DeviceCli),
     /// Make sure the MGA data is up to date.
     UpdateMga(MgaUpdateOptions),
     /// Generate shell completion
-    Completion(GenerateCommand),
+    Completion(GenerateCli),
 }
 
 impl Cli {
     pub async fn run(self, config: Option<XossUtilConfig>) -> Result<()> {
         match self.command {
+            CliCommand::Setup(setup) => setup
+                .run(config)
+                .await
+                .context("Failed to run the setup subcommand"),
+            CliCommand::Paths => {
+                let app_dirs = config::APP_DIRS.deref();
+
+                let mut table = table![
+                    ["Config file:", config::config_path().display()],
+                    ["Data directory:", app_dirs.data_dir().display()],
+                    ["Cache directory:", app_dirs.cache_dir().display()]
+                ];
+                table.set_format(*prettytable::format::consts::FORMAT_CLEAN);
+
+                info!("Paths:\n{}", table);
+
+                Ok(())
+            }
             CliCommand::Dev(dev) => {
                 let device = crate::locate_util::find_device_from_config(&config)
                     .await

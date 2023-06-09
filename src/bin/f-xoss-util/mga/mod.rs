@@ -4,9 +4,11 @@ use crate::cli::MgaUpdateOptions;
 use crate::config::MgaConfig;
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use surf::Url;
-use tracing::{debug, warn};
+use surf::{StatusCode, Url};
+use thiserror::Error;
+use tracing::{debug, instrument, warn};
 
 fn mga_file_path() -> PathBuf {
     crate::config::APP_DIRS.cache_dir().join("mgaoffline.ubx")
@@ -16,6 +18,19 @@ pub struct MgaData {
     pub data: Vec<u8>,
     pub valid_since: NaiveDate,
     pub valid_until: NaiveDate,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ErrorResponse {
+    pub message: String,
+}
+
+#[derive(Error, Debug)]
+enum Error {
+    #[error("The u-blox token is invalid")]
+    BadToken,
+    #[error("Some other error has occurred")]
+    Other(#[from] anyhow::Error),
 }
 
 fn mga_build_url(config: &MgaConfig) -> Result<Url> {
@@ -55,19 +70,39 @@ fn mga_build_url(config: &MgaConfig) -> Result<Url> {
     Ok(url)
 }
 
-async fn download_mga_data(config: &MgaConfig) -> Result<MgaData> {
+#[instrument(skip(config))]
+async fn download_mga_data(config: &MgaConfig) -> Result<MgaData, Error> {
     let url = mga_build_url(config)?;
 
-    let raw_data = surf::get(url)
+    let mut response = surf::get(url)
         .await
         .map_err(|err| anyhow!(err))
-        .context("Failed to download MGA data")?
+        .context("Failed to download MGA data")?;
+
+    match response.status() {
+        StatusCode::Ok => {}
+        StatusCode::BadRequest => {
+            let error: ErrorResponse = response.body_json().await.map_err(|err| anyhow!(err))?;
+            let error = match error.message.as_str() {
+                message if message.starts_with("Invalid token: ") => Error::BadToken,
+                message => {
+                    warn!("Unknown error message from u-blox: {}", message);
+                    Error::Other(anyhow!("u-blox API returned Bad Request: {}", message))
+                }
+            };
+
+            return Err(error);
+        }
+        _ => return Err(anyhow!("Unexpected response status: {}", response.status()).into()),
+    }
+
+    let raw_data = response
         .body_bytes()
         .await
         .map_err(|err| anyhow!(err))
         .context("Failed to read MGA data")?;
 
-    parse::parse_mga_data(raw_data).context("Parsing downloaded MGA data")
+    Ok(parse::parse_mga_data(raw_data).context("Parsing downloaded MGA data")?)
 }
 
 async fn get_current_mga_data() -> Result<Option<MgaData>> {
@@ -118,5 +153,19 @@ pub async fn get_mga_data(config: &MgaConfig, options: &MgaUpdateOptions) -> Res
                 .context("Writing MGA data to cache")?;
             Ok(data)
         }
+    }
+}
+
+pub async fn check_ublox_token(token: &str) -> Result<bool> {
+    let result = download_mga_data(&MgaConfig {
+        ublox_token: Some(token.to_string()),
+        ..Default::default()
+    })
+    .await;
+
+    match result {
+        Ok(_) => Ok(true),
+        Err(Error::BadToken) => Ok(false),
+        Err(e) => Err(e).context("Using token to test-download the data")?,
     }
 }

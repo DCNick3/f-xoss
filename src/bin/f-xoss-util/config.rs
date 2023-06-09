@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use btleplug::api::BDAddr;
 use directories::ProjectDirs;
 use once_cell::sync::Lazy;
-use serde::de;
 use serde::Deserialize;
+use serde::{de, Serialize};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
@@ -23,10 +23,20 @@ where
     Ok(addr)
 }
 
-#[derive(Deserialize, Debug, Clone)]
+fn serialize_bdaddr<S>(addr: &BDAddr, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&addr.to_string())
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct XossDeviceInfo {
     pub name: Option<String>,
-    #[serde(deserialize_with = "deserialize_bdaddr")]
+    #[serde(
+        deserialize_with = "deserialize_bdaddr",
+        serialize_with = "serialize_bdaddr"
+    )]
     pub address: BDAddr,
 }
 
@@ -39,7 +49,7 @@ impl XossDeviceInfo {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct MgaConfig {
     pub base_url: Option<String>,
     pub period_weeks: Option<u32>,
@@ -47,7 +57,7 @@ pub struct MgaConfig {
     pub ublox_token: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct XossUtilConfig {
     pub devices: Vec<XossDeviceInfo>,
     #[serde(default)]

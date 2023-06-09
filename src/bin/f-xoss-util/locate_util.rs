@@ -11,7 +11,7 @@ use tokio_stream::{Stream, StreamExt};
 use tracing::{info, info_span, instrument, warn};
 use tracing_futures::Instrument;
 
-async fn find_adapter(manager: &Manager) -> Result<Adapter> {
+pub async fn find_adapter(manager: &Manager) -> Result<Adapter> {
     let adapter_list = manager.adapters().await.context("Listing adapters")?;
     let adapter_count = adapter_list.len();
 
