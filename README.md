@@ -24,9 +24,28 @@ Not yet implemented:
 
 #### 1. Install the app
 
+You can use a bash installer on linux or macOS:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/DCNick3/f-xoss/releases/latest/download/f-xoss-util-installer.sh | sh
 ```
-cargo install --git https://github.com/DCNick3/f-xoss.git
-f-xoss-util dev sync
+
+And a powershell installer on Windows:
+
+```powershell
+irm https://github.com/DCNick3/f-xoss.git/releases/download/f-xoss-util-installer.ps1 | iex
+```
+
+Alternatively, `cargo binstall` can be used:
+
+```bash
+cargo binstall f-xoss-util
+```
+
+Finally, you can build it from source with `cargo install`:
+
+```bash
+cargo install f-xoss-util
 ```
 
 #### 1.1. (Optional) You can also install shell completion with
