@@ -33,15 +33,11 @@ async fn sync_workouts(device: &XossDevice, _options: &SyncOptions) -> Result<()
         .template("{span_child_prefix}{spinner:.green} [{bar:40.cyan/blue}] {human_pos}/{human_len} ({eta} @ {per_sec})")
         .unwrap()
         .progress_chars("#>-"));
-    current_span.pb_set_length(workouts.len() as u64);
+    current_span.pb_set_length(missing_workouts.len() as u64);
 
     for workout in missing_workouts {
         let workout_filename = workout.filename();
         let workout_path = local_workouts_dir.join(&workout_filename);
-
-        if workout_path.exists() {
-            continue;
-        }
 
         info!(
             "Downloading workout {:?} to {:?}",
