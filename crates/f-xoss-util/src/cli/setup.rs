@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use btleplug::api::{
     BDAddr, Central, CentralEvent, Peripheral as _, PeripheralProperties, ScanFilter,
 };
-use btleplug::platform::{Adapter, Peripheral};
+use btleplug::platform::{Adapter, Peripheral, PeripheralId};
 use console::Term;
 use dialoguer::theme::ColorfulTheme;
 use f_xoss::device::XossDevice;
@@ -28,6 +28,7 @@ static DIALOGUER_THEME: Lazy<ColorfulTheme> = Lazy::new(|| ColorfulTheme::defaul
 
 #[derive(Clone, Debug)]
 struct ScannerDevice {
+    peripheral_id: PeripheralId,
     peripheral: Peripheral,
     address: BDAddr,
     properties: PeripheralProperties,
@@ -95,7 +96,10 @@ impl ScannerState {
     async fn add_device(&self, device: ScannerDevice) {
         let mut devices = self.devices.lock().await;
 
-        if !devices.iter().any(|d| d.address == device.address) {
+        if !devices
+            .iter()
+            .any(|d| d.peripheral_id == device.peripheral_id)
+        {
             devices.push(device);
         }
     }
@@ -147,6 +151,7 @@ impl ScannerState {
                 };
 
                 let device = ScannerDevice {
+                    peripheral_id,
                     peripheral,
                     address,
                     properties,
@@ -241,7 +246,7 @@ async fn find_device() -> Result<XossDeviceInfo> {
 
     Ok(XossDeviceInfo {
         name: device.properties.local_name.clone(),
-        address: device.address,
+        peripheral_id: device.peripheral_id,
     })
 }
 

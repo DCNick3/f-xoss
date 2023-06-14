@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use btleplug::api::BDAddr;
+use btleplug::platform::PeripheralId;
 use directories::ProjectDirs;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
@@ -33,11 +34,13 @@ where
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct XossDeviceInfo {
     pub name: Option<String>,
-    #[serde(
-        deserialize_with = "deserialize_bdaddr",
-        serialize_with = "serialize_bdaddr"
-    )]
-    pub address: BDAddr,
+    // NOTE: meaning of PeripheralId is platform-specific:
+    // - on linux, it's DBus object path
+    // - on macOS, it's a device UUID
+    // - on Windows, it's just BDADDR
+    //
+    // This makes config platform-specific... Kinda sad, but it's not like user would want to move it or something
+    pub peripheral_id: PeripheralId,
 }
 
 impl XossDeviceInfo {
@@ -45,7 +48,7 @@ impl XossDeviceInfo {
         self.name
             .as_ref()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| self.address.to_string())
+            .unwrap_or_else(|| self.peripheral_id.to_string())
     }
 }
 

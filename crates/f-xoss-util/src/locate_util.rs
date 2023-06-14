@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use crate::config::XossUtilConfig;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use btleplug::api::{BDAddr, Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use f_xoss::device::XossDevice;
@@ -103,7 +103,7 @@ pub async fn find_device_from_config(config: &Option<XossUtilConfig>) -> Result<
 
     info!("Will try to connect to {}", device_info.identify());
 
-    let ble_addr = device_info.address;
+    let peripheral_id = &device_info.peripheral_id;
 
     let manager = Manager::new().await.context("Failed to create a manager")?;
     let adapter = find_adapter(&manager) // TODO: allow specifying adapter in config/cli
@@ -113,10 +113,10 @@ pub async fn find_device_from_config(config: &Option<XossUtilConfig>) -> Result<
     const MAX_RECONNECTION_ATTEMPTS: usize = 3;
     for attempt in 0..=MAX_RECONNECTION_ATTEMPTS {
         let attempt_result = async {
-            let peripheral = find_ble_peripheral(&adapter, ble_addr)
+            let peripheral = adapter
+                .peripheral(peripheral_id)
                 .await
-                .context("Failed to find device")?
-                .ok_or_else(|| anyhow!("Device not found"))?;
+                .context("Failed to get peripheral")?;
 
             peripheral
                 .connect()
