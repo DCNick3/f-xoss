@@ -277,6 +277,8 @@ async fn save_config(config: &XossUtilConfig) -> Result<()> {
     let config_path = config::config_path();
 
     info!("Saving the config to {}", config_path.display());
+    std::fs::create_dir_all(config_path.parent().unwrap())
+        .context("Creating the config directory")?;
     std::fs::write(
         &config_path,
         toml::to_string_pretty(config).context("Serializing the config file")?,
@@ -290,6 +292,8 @@ async fn save_config_with_confirmation(config: &XossUtilConfig) -> Result<()> {
     // find the diff of the config & the current config, and show it to the user
 
     let config_path = config::config_path();
+
+    // note: this never fails because the function is only called when a config file already exists
     let old_config = std::fs::read_to_string(&config_path).context("Reading old config file")?;
     let new_config = toml::to_string_pretty(config).context("Serializing the new config file")?;
 
